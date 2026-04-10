@@ -8,7 +8,9 @@ from reason.ICoT_reason import ICoT_Reasoner
 from judge.judger import Judger
 from sample_format.sample import Sample
 
-from llm.vllmcaller import VLLMCaller,VLLMCallerConfig
+from llm.vllmcaller import VLLMCaller, VLLMCallerConfig
+from llm.hfseq2seqcaller import HFSeq2SeqCaller, HFSeq2SeqCallerConfig
+from llm.openai_caller import OpenAICaller, OpenAICallerConfig
 
 import time
 import util.file_op as op
@@ -154,12 +156,51 @@ def run(config):
     
 def main(config_info, run_step):
     
+    model_cfg = config_info['model_config']
+
     if run_step == 'reason':
-        caller_config = VLLMCallerConfig(model_name=config_info['model_config']['reason_model_name'], use_cards=config_info['model_config']['reason_model_cards'], llmpath=config_info['model_config']['reason_model_path'], max_model_len=config_info['model_config']['reason_max_model_len'], temperature=config_info['model_config']['reason_temperature'])
-        llmcaller = VLLMCaller(caller_config)
-    elif run_step == 'judge' and config_info['model_config']['judge_model_path'] != "":
-        caller_config = VLLMCallerConfig(model_name=config_info['model_config']['judge_model_name'], use_cards=config_info['model_config']['judge_model_cards'], llmpath=config_info['model_config']['judge_model_path'], max_model_len=config_info['model_config']['judge_max_model_len'], temperature=0.2)
-        llmcaller = VLLMCaller(caller_config)
+        caller_type = model_cfg.get('caller_type', 'vllm')
+        if caller_type == 'hf_seq2seq':
+            caller_config = HFSeq2SeqCallerConfig(
+                model_name=model_cfg['reason_model_name'],
+                llmpath=model_cfg['reason_model_path'],
+                max_model_len=model_cfg['reason_max_model_len'],
+                temperature=model_cfg['reason_temperature'],
+                max_new_tokens=model_cfg.get('max_new_tokens', 512),
+                batch_size=model_cfg.get('hf_batch_size', 4),
+            )
+            llmcaller = HFSeq2SeqCaller(caller_config)
+        else:
+            caller_config = VLLMCallerConfig(
+                model_name=model_cfg['reason_model_name'],
+                use_cards=model_cfg['reason_model_cards'],
+                llmpath=model_cfg['reason_model_path'],
+                max_model_len=model_cfg['reason_max_model_len'],
+                temperature=model_cfg['reason_temperature'],
+            )
+            llmcaller = VLLMCaller(caller_config)
+
+    elif run_step == 'judge':
+        judge_caller_type = model_cfg.get('judge_caller_type', 'vllm')
+        if judge_caller_type == 'openai':
+            caller_config = OpenAICallerConfig(
+                model_name=model_cfg['judge_model_name'],
+                temperature=0.2,
+            )
+            llmcaller = OpenAICaller(caller_config)
+        elif model_cfg.get('judge_model_path', '') != '':
+            caller_config = VLLMCallerConfig(
+                model_name=model_cfg['judge_model_name'],
+                use_cards=model_cfg['judge_model_cards'],
+                llmpath=model_cfg['judge_model_path'],
+                max_model_len=model_cfg['judge_max_model_len'],
+                temperature=0.2,
+            )
+            llmcaller = VLLMCaller(caller_config)
+        else:
+            # No judge model configured — only ROUGE/EM/BLEU will work
+            llmcaller = None
+
     else:
         raise ValueError(f"No matching run_step found for '{run_step}'")
     

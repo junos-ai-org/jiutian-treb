@@ -1,0 +1,13 @@
+ARG BASE_IMAGE=treb-base:latest
+FROM ${BASE_IMAGE}
+
+# T5Gemma backend: HuggingFace transformers + flash-attn (compiled from source)
+RUN pip install --no-cache-dir \
+    accelerate sentencepiece protobuf \
+    flash-attn --no-build-isolation
+
+COPY docker/entrypoint-t5gemma.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT []
+CMD ["/entrypoint.sh"]

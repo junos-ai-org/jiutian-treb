@@ -1,0 +1,11 @@
+ARG BASE_IMAGE=treb-base:latest
+FROM ${BASE_IMAGE}
+
+# Qwen2.5 backend: vLLM (brings its own attention kernels)
+RUN pip install --no-cache-dir vllm
+
+COPY docker/entrypoint-qwen.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT []
+CMD ["/entrypoint.sh"]

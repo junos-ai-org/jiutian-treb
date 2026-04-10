@@ -13,7 +13,8 @@ def is_safe_path(path):
     base_dirs = [
         os.path.abspath(os.path.join(os.getcwd(), '../config')),
         os.path.abspath(os.path.join(os.getcwd(), "../eval_log/")),
-        os.path.abspath(os.path.join(os.getcwd(), "../eval_output/"))
+        os.path.abspath(os.path.join(os.getcwd(), "../eval_output/")),
+        os.path.abspath(os.path.join(os.getcwd(), "../experiments/")),
     ]
     
     # Normalize the path to prevent path traversal attacks

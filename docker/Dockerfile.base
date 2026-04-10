@@ -1,0 +1,39 @@
+FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-devel
+
+# System tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    screen vim grep htop curl net-tools procps git openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# TReB shared dependencies (everything from requirements.txt except vllm + torch,
+# since torch comes from the base image and vllm goes in the qwen image only).
+# Plus: openai (for judge), datasets + huggingface_hub (for sampling & model download).
+RUN pip install --no-cache-dir \
+    bs4==0.0.2 \
+    jieba==0.42.1 \
+    matplotlib==3.9.4 \
+    networkx==3.2.1 \
+    ninja==1.11.1.4 \
+    nltk==3.9.1 \
+    numpy==2.0.2 \
+    pandas==2.2.3 \
+    rouge-chinese==1.0.3 \
+    rouge_score==0.1.2 \
+    sacrebleu==2.5.1 \
+    scikit-learn==1.6.1 \
+    statsmodels==0.14.4 \
+    seaborn==0.13.2 \
+    tqdm==4.67.1 \
+    transformers==4.51.3 \
+    openai datasets "huggingface_hub[cli]" pyyaml \
+    && ln -sf "$(which python3)" /usr/local/bin/python
+
+# Convenience script to update code mid-session without restarting
+RUN cat <<'SCRIPT' > /usr/local/bin/treb-update && chmod +x /usr/local/bin/treb-update
+#!/bin/bash
+set -e
+cd /workspace/jiutian-treb
+echo "Pulling latest code..."
+git pull
+echo "Done."
+SCRIPT
