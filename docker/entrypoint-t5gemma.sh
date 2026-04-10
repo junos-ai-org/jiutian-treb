@@ -53,8 +53,8 @@ if [ -n "${DEPLOY_KEY:-}" ]; then
 fi
 
 # --- Clone or update TReB code -------------------------------------------------
-TREB_REPO="${TREB_GIT_URL:-https://github.com/JT-LM/jiutian-treb.git}"
-TREB_REF="${TREB_GIT_REF:-main}"
+TREB_REPO="${TREB_GIT_URL:-git@github.com:junos-ai-org/jiutian-treb.git}"
+TREB_REF="${TREB_GIT_REF:-bidir-attn-experiment}"
 
 if [ -d /workspace/jiutian-treb/.git ]; then
     log "Updating TReB code (ref: ${TREB_REF})..."
