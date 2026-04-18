@@ -18,13 +18,8 @@ cd "$(dirname "$0")"
 
 # Resolve SHA from the repo root; fail loudly if not a git checkout.
 SHA="$(git rev-parse --short HEAD)"
-DIRTY=""
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  DIRTY="-dirty"
-  echo "WARNING: working tree is dirty — tagging ${SHA}${DIRTY}" >&2
-fi
 
-TAGS=( "${IMAGE}:${SHA}${DIRTY}" "${IMAGE}:latest" )
+TAGS=( "${IMAGE}:${SHA}" "${IMAGE}:latest" )
 for extra in "$@"; do
   TAGS+=( "${IMAGE}:${extra}" )
 done
@@ -43,4 +38,4 @@ if [[ "$PUSH" == "1" ]]; then
 fi
 
 echo
-echo "done. pinned tag: ${IMAGE}:${SHA}${DIRTY}"
+echo "done. pinned tag: ${IMAGE}:${SHA}"
