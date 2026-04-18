@@ -10,7 +10,7 @@ import argparse
 from pathlib import Path
 
 import yaml
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
 from transformers import AutoTokenizer
 
 
@@ -24,10 +24,17 @@ def main() -> None:
 
     tok = AutoTokenizer.from_pretrained(m["name_or_path"])
 
-    ds = load_dataset(d["dataset_name"], split="train", cache_dir=d["cache_dir"])
-    ds = ds.shuffle(seed=d["seed"])
+    # Stream the dataset and take only what we need. Non-streaming mode on
+    # Open-Orca/FLAN pulls all 2157 parquet shards (hundreds of GB, ~2 hours),
+    # which is wasteful when we only want 100K rows.
     total = d["train_size"] + d["eval_size"]
-    ds = ds.select(range(min(total, len(ds))))
+    stream = load_dataset(
+        d["dataset_name"], split="train", streaming=True, cache_dir=d["cache_dir"]
+    )
+    # Light shuffle within a buffer to de-bias from shard order.
+    stream = stream.shuffle(seed=d["seed"], buffer_size=10_000)
+    samples = list(stream.take(total))
+    ds = Dataset.from_list(samples)
     split = ds.train_test_split(test_size=d["eval_size"], seed=d["seed"])
 
     def preprocess(batch):
