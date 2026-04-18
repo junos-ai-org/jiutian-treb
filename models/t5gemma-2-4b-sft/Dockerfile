@@ -1,4 +1,4 @@
-FROM runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu
+FROM runpod/pytorch:1.0.3-cu1281-torch280-ubuntu2404
 
 WORKDIR /workspace/sft
 
