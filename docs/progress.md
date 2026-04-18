@@ -14,6 +14,17 @@ Narrative journal for the encoder-vs-decoder TReB experiment. Append newest entr
 
 ---
 
+## 2026-04-18 — First successful image build
+**Status**: done
+**What happened**: Installed `gh` CLI in the Claude container, authenticated via device flow as `arunkumarchithanar`. First workflow run failed because the Dockerfile's base image tag `runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu` doesn't exist — RunPod moved to the pattern `<rev>-cu<cuda>-torch<torchver>-ubuntu<ubuntuver>`. Switched to `runpod/pytorch:1.0.3-cu1281-torch280-ubuntu2404` (CUDA 12.8.1, torch 2.8.0, Ubuntu 24.04). Push auto-triggered the workflow; build succeeded in ~3 min.
+**Decisions**: Use RunPod's current tag scheme; pin `cu1281-torch280-ubuntu2404` for reproducibility.
+**Next**: Launch RunPod A100 pod with `achithanar/t5gemma-sft:56e594c`, mount network volume, run `prepare_data.py` then smoke `train.py` (tiny subset) to verify non-zero loss before committing to full FLAN SFT.
+**Artifacts**:
+- Docker Hub: `achithanar/t5gemma-sft:latest` + `:56e594c` (10.3 GB)
+- Workflow run: https://github.com/junos-ai-org/jiutian-treb/actions/runs/24615161282
+
+---
+
 ## 2026-04-18 — GitHub Actions image build
 **Status**: in-progress
 **What happened**: Added `.github/workflows/build-sft-image.yml` — builds the SFT image on Ubuntu runners via `docker/build-push-action@v6` with GHA buildx cache, pushes to `achithanar/t5gemma-sft`. Triggers on pushes to `experiment-setup`/`main` touching `models/t5gemma-2-4b-sft/**`, plus `workflow_dispatch` with an optional `extra_tag` input. Tags: `<short-sha>` + `:latest` (on branch push) + optional extra. Kept `build.sh` as a local fallback.
