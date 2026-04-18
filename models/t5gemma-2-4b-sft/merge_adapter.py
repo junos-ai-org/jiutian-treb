@@ -26,7 +26,7 @@ def main() -> None:
 
     tok = AutoTokenizer.from_pretrained(args.base)
     base = AutoModelForSeq2SeqLM.from_pretrained(
-        args.base, torch_dtype=torch.bfloat16, attn_implementation="eager"
+        args.base, dtype=torch.bfloat16, attn_implementation="eager"
     )
     merged = PeftModel.from_pretrained(base, args.adapter).merge_and_unload()
     merged.save_pretrained(args.out, safe_serialization=True)

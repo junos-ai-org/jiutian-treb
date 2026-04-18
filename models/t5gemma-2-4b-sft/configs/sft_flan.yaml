@@ -2,9 +2,10 @@
 # Loaded by train.py.
 
 model:
-  name_or_path: google/t5gemma-2-4b-4b-ul2
+  name_or_path: google/t5gemma-2-4b-4b
   attn_implementation: eager        # flash_attention_2 has known bugs on T5Gemma
-  torch_dtype: bfloat16
+  dtype: bfloat16                   # v5 renamed torch_dtype → dtype
+  device_map: auto                  # required for bnb 4-bit loading
 
 quantization:
   load_in_4bit: true

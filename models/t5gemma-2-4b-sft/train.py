@@ -42,11 +42,16 @@ def build_model(cfg):
         m["name_or_path"],
         quantization_config=bnb,
         attn_implementation=m["attn_implementation"],
-        torch_dtype=DTYPES[m["torch_dtype"]],
+        dtype=DTYPES[m["dtype"]],
+        device_map=m["device_map"],
     )
     model = prepare_model_for_kbit_training(
         model, use_gradient_checkpointing=cfg["training"]["gradient_checkpointing"]
     )
+    # Defensive: encoder-decoder LoRA needs embedding grads to flow through the
+    # encoder. peft's kbit helper already calls this for the kbit+reentrant path,
+    # but calling it explicitly is idempotent and covers non-reentrant edge cases.
+    model.enable_input_require_grads()
     peft_cfg = LoraConfig(
         task_type=TaskType[l["task_type"]],
         r=l["r"],
@@ -122,7 +127,7 @@ def main() -> None:
         args=training_args,
         train_dataset=splits["train"],
         eval_dataset=splits["test"],
-        tokenizer=tokenizer,
+        processing_class=tokenizer,     # v5 renamed tokenizer= → processing_class=
         data_collator=collator,
     )
 
