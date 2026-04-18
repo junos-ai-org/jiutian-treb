@@ -119,8 +119,14 @@ def main() -> None:
         hub_token=os.environ.get("HF_TOKEN"),
     )
 
+    # Do NOT pass `model=model` here. T5Gemma2's
+    # prepare_decoder_input_ids_from_labels has a broken signature (doesn't
+    # accept `labels=`), which raises TypeError during collation. Without
+    # `model=`, the collator skips precomputing decoder_input_ids and the
+    # model auto-shifts labels during forward via _shift_right — standard
+    # encoder-decoder behavior.
     collator = DataCollatorForSeq2Seq(
-        tokenizer, model=model, label_pad_token_id=-100, pad_to_multiple_of=8
+        tokenizer, label_pad_token_id=-100, pad_to_multiple_of=8
     )
 
     trainer = Seq2SeqTrainer(
