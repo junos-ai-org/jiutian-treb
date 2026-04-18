@@ -14,8 +14,9 @@ context and hyperparameter rationale.
    # on the build server
    git clone git@github.com:junos-ai-org/jiutian-treb.git
    cd jiutian-treb/models/t5gemma-2-4b-sft
-   docker build -t achithanar/t5gemma-sft:latest .
-   docker push achithanar/t5gemma-sft:latest
+   ./build.sh                  # tags: <short-sha> + latest, then pushes
+   ./build.sh flan-100k        # add an extra human-readable tag
+   PUSH=0 ./build.sh           # build only, skip push
    ```
    Re-pull + rebuild + push whenever `train.py`, `prepare_data.py`,
    `requirements.txt`, or the Dockerfile changes. Config YAML changes
