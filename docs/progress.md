@@ -14,6 +14,15 @@ Narrative journal for the encoder-vs-decoder TReB experiment. Append newest entr
 
 ---
 
+## 2026-04-18 — GitHub Actions image build
+**Status**: in-progress
+**What happened**: Added `.github/workflows/build-sft-image.yml` — builds the SFT image on Ubuntu runners via `docker/build-push-action@v6` with GHA buildx cache, pushes to `achithanar/t5gemma-sft`. Triggers on pushes to `experiment-setup`/`main` touching `models/t5gemma-2-4b-sft/**`, plus `workflow_dispatch` with an optional `extra_tag` input. Tags: `<short-sha>` + `:latest` (on branch push) + optional extra. Kept `build.sh` as a local fallback.
+**Decisions**: CI-based builds primary; AWS build server secondary. Secrets required: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+**Next**: Add Docker Hub secrets to the repo (Settings → Secrets → Actions). Confirm first workflow run succeeds and the image lands on Docker Hub.
+**Artifacts**: `.github/workflows/build-sft-image.yml`
+
+---
+
 ## 2026-04-18 — Code review + v5 correctness fixes
 **Status**: in-progress
 **What happened**: Audited the SFT scaffold against live HF Hub + transformers v5 docs. Found and fixed:

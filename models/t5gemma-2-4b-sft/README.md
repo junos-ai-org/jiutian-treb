@@ -9,22 +9,23 @@ context and hyperparameter rationale.
 
 ## Flow
 
-1. **Build + push image** (AWS build server)
+1. **Build + push image** — GitHub Actions (preferred)
+   Workflow: `.github/workflows/build-sft-image.yml`. Runs automatically on
+   pushes to `experiment-setup`/`main` that touch `models/t5gemma-2-4b-sft/**`.
+   Manual run with an extra tag:
+   - Actions tab → "Build SFT image" → "Run workflow" → set `extra_tag`.
+   Tags pushed: `achithanar/t5gemma-sft:<short-sha>` + `:latest` (+ optional).
+   Required repo secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+
+   **Local fallback** (AWS build server), same tag scheme:
    ```
-   # on the build server
-   # HTTPS — build server uses gh CLI as git credential helper
    git clone https://github.com/junos-ai-org/jiutian-treb.git
-   cd jiutian-treb
-   git checkout experiment-setup
+   cd jiutian-treb && git checkout experiment-setup
    cd models/t5gemma-2-4b-sft
-   ./build.sh                  # tags: <short-sha> + latest, then pushes
-   ./build.sh flan-100k        # add an extra human-readable tag
-   PUSH=0 ./build.sh           # build only, skip push
+   ./build.sh                  # <short-sha> + latest
+   ./build.sh flan-100k        # + extra tag
+   PUSH=0 ./build.sh           # build only
    ```
-   Re-pull + rebuild + push whenever `train.py`, `prepare_data.py`,
-   `requirements.txt`, or the Dockerfile changes. Config YAML changes
-   alone don't require a rebuild if you bind-mount `configs/` on the pod;
-   otherwise rebuild to bake the new config.
 2. **RunPod: A100 80GB + network volume mounted at `/workspace`.**
    Set pod env vars: `HF_TOKEN`, `WANDB_API_KEY`.
 3. **Pre-tokenize FLAN (once, lands on volume):**
