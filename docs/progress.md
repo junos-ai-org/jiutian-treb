@@ -14,6 +14,22 @@ Narrative journal for the encoder-vs-decoder TReB experiment. Append newest entr
 
 ---
 
+## 2026-04-18 — Smoke pod launched
+**Status**: in-progress
+**What happened**:
+- Refactored image so code lives at `/opt/sft` (not `/workspace`) because the RunPod network volume mounts at `/workspace` and would shadow it. Added `run.sh` entrypoint that runs `prepare_data.py` once (skips if tokenized dir exists) then `train.py`. Added `configs/sft_flan_smoke.yaml` (200 samples, 50 steps, no hub push, no wandb).
+- RunPod setup: created 200 GB network volume `l6pnvotcgk` in US-WA-1. A100 SXM 80GB available at $1.39/hr (Low stock; only US-KS-2, US-MO-1, US-WA-1 have it).
+- Launched pod `gn2j7nxbog1kca` with image `achithanar/t5gemma-sft:14785c8`, volume mounted at `/workspace`, env `CONFIG=configs/sft_flan_smoke.yaml`, `HF_TOKEN` and `WANDB_API_KEY` set (wandb unused in smoke).
+- Pod RUNNING, SSH on `195.26.233.55:32642`. GPU utilization 0% — data/model download phase.
+**Decisions**: Ran smoke before full to validate pod boot, GPU access, gated-model download, and non-zero loss with minimal spend.
+**Next**: Monitor GPU util; once training starts verify non-zero loss. Then launch full run (100K FLAN, 1 epoch, push_to_hub enabled).
+**Artifacts**:
+- Pod console: https://www.runpod.io/console/pods/gn2j7nxbog1kca
+- Volume: `l6pnvotcgk` (200 GB, US-WA-1)
+- Image: `achithanar/t5gemma-sft:14785c8`
+
+---
+
 ## 2026-04-18 — First successful image build
 **Status**: done
 **What happened**: Installed `gh` CLI in the Claude container, authenticated via device flow as `arunkumarchithanar`. First workflow run failed because the Dockerfile's base image tag `runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu` doesn't exist — RunPod moved to the pattern `<rev>-cu<cuda>-torch<torchver>-ubuntu<ubuntuver>`. Switched to `runpod/pytorch:1.0.3-cu1281-torch280-ubuntu2404` (CUDA 12.8.1, torch 2.8.0, Ubuntu 24.04). Push auto-triggered the workflow; build succeeded in ~3 min.
