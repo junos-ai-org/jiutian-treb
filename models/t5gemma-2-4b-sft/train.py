@@ -90,6 +90,7 @@ def main() -> None:
     training_args = Seq2SeqTrainingArguments(
         output_dir=t["output_dir"],
         num_train_epochs=t["num_train_epochs"],
+        max_steps=t.get("max_steps", -1),      # -1 = ignore, use epochs
         per_device_train_batch_size=t["per_device_train_batch_size"],
         per_device_eval_batch_size=t["per_device_eval_batch_size"],
         gradient_accumulation_steps=t["gradient_accumulation_steps"],
