@@ -1,6 +1,8 @@
 FROM runpod/pytorch:1.0.3-cu1281-torch280-ubuntu2404
 
-WORKDIR /workspace/sft
+# Code lives at /opt/sft (NOT /workspace) because the RunPod network volume
+# mounts at /workspace and would shadow any code placed there.
+WORKDIR /opt/sft
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -14,4 +16,4 @@ ENV HF_HOME=/workspace/hf-cache \
     HF_DATASETS_CACHE=/workspace/hf-cache \
     CONFIG=configs/sft_flan.yaml
 
-CMD ["bash", "/workspace/sft/run.sh"]
+CMD ["bash", "/opt/sft/run.sh"]
