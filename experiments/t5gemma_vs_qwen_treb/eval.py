@@ -105,22 +105,29 @@ def run_vllm(config: dict, samples: list[dict]) -> list[str]:
         trust_remote_code=True,
     )
     tokenizer = llm.get_tokenizer()
-    sp_kwargs = dict(
+    sp = SamplingParams(
         temperature=g.get("temperature", 0.0),
         top_p=g.get("top_p", 1.0),
         max_tokens=g.get("max_new_tokens", 512),
     )
-    # If a max input budget is set (e.g., to match a context-limited variant
-    # like T5Gemma @ 2K), truncate prompts from the right to that many tokens.
-    # vLLM's truncate_prompt_tokens keeps the first N tokens.
+    # Optionally cap prompt length (e.g., to match a context-limited variant
+    # like T5Gemma @ 2K). Done client-side via tokenize → slice → re-decode,
+    # because SamplingParams kwarg names vary across vLLM versions.
     max_input = config["eval"].get("max_input_tokens")
-    if max_input:
-        sp_kwargs["truncate_prompt_tokens"] = max_input
-    sp = SamplingParams(**sp_kwargs)
     prompts = []
+    truncated_count = 0
     for s in samples:
         msgs = [{"role": "user", "content": build_prompt_tcot(s)}]
-        prompts.append(tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True))
+        text = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+        if max_input:
+            ids = tokenizer.encode(text, add_special_tokens=False)
+            if len(ids) > max_input:
+                ids = ids[:max_input]
+                text = tokenizer.decode(ids, skip_special_tokens=False)
+                truncated_count += 1
+        prompts.append(text)
+    if max_input:
+        print(f"[eval] prompt-truncated {truncated_count}/{len(samples)} at {max_input} tokens", flush=True)
     outs = llm.generate(prompts, sp)
     # vLLM returns outputs in same order as prompts
     return [o.outputs[0].text for o in outs]
