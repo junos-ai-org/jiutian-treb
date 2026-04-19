@@ -9,6 +9,7 @@ rouge-score>=0.1.2
 httpx>=0.27.0
 pyyaml>=6.0
 wandb>=0.18.0
-# flash-attn: attempted via attn_implementation="flash_attention_2"; if it
-# crashes on T5Gemma 2 (see learnings.md), fall back to eager in the config.
-flash-attn>=2.7.0; platform_system != "Darwin"
+# flash-attn deliberately not pinned — its wheel needs torch present at build
+# time (use --no-build-isolation) and our learnings show eager works for
+# T5Gemma 2. If you want to test flash_attention_2, install on the pod:
+#   pip install --no-build-isolation flash-attn>=2.7.0
