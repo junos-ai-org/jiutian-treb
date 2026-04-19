@@ -23,8 +23,8 @@ eval:
   language: English           # English JSONs under English/*.json
   mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
   smoke_size: 100             # stratified across tasks when --smoke
-  batch_size: 16              # dropped from 32 after sdpa+32K OOM margin check
-  max_input_tokens: 32768     # matches qwen context; fits comfortably with batch=32
+  batch_size: 8               # dropped from 16 to fit eager memory budget at max_input=8192
+  max_input_tokens: 8192      # eager attention is O(seq^2); 32K OOMs on 94GB GPU
 
 output:
   # Default is the network volume so results survive pod termination.
