@@ -1,6 +1,8 @@
 # DDP variant of sft_flan.yaml for multi-GPU runs.
-# batch_per_gpu × grad_accum × N_gpus = 32 (matches 1-GPU run for apples-to-apples).
-# At N=4:  2 × 4 × 4 = 32
+# Targeting effective batch 128 on 4× H100 for fastest wall-clock:
+#   8 per-GPU × grad_accum 4 × 4 GPUs = 128
+# LR sqrt-scaled from 2e-4 at batch=32 → 4e-4 at batch=128.
+# Longer warmup (0.05) for big-batch stability.
 
 model:
   name_or_path: google/t5gemma-2-4b-4b
@@ -37,12 +39,12 @@ data:
 training:
   output_dir: /workspace/checkpoints/t5gemma-2-4b-flan-sft-ddp
   num_train_epochs: 1
-  per_device_train_batch_size: 2             # 2 × 4 × 4 GPUs = 32 effective
-  per_device_eval_batch_size: 2
+  per_device_train_batch_size: 8             # 8 × 4 × 4 GPUs = 128 effective
+  per_device_eval_batch_size: 8
   gradient_accumulation_steps: 4
-  learning_rate: 2.0e-4
+  learning_rate: 4.0e-4                      # sqrt scaling from 2e-4 at batch=32
   lr_scheduler_type: cosine
-  warmup_ratio: 0.03
+  warmup_ratio: 0.05                         # longer warmup for larger batch
   weight_decay: 0.0
   bf16: true
   optim: paged_adamw_8bit
@@ -56,7 +58,7 @@ training:
   predict_with_generate: false
   generation_max_length: 384
   report_to: [wandb]
-  run_name: t5gemma-2-4b-flan-sft-ddp-4xh100
+  run_name: t5gemma-2-4b-flan-sft-ddp-4xh100-bs128
   seed: 42
 
 hub:
