@@ -24,7 +24,7 @@ eval:
   mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
   smoke_size: 100             # stratified across tasks when --smoke
   batch_size: 8               # dropped from 16 to fit eager memory budget at max_input=8192
-  max_input_tokens: 8192      # eager attention is O(seq^2); 32K OOMs on 94GB GPU
+  max_input_tokens: 2048      # T5Gemma 2 attention has shape bug above ~2K in transformers v5; tracked as implementation limit vs Qwens 32K
 
 output:
   # Default is the network volume so results survive pod termination.
