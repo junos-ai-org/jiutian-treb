@@ -29,17 +29,17 @@ data:
   seed: 42
   input_field: inputs
   target_field: targets
-  max_input_length: 2048
-  max_target_length: 512
+  max_input_length: 1024          # FLAN medians ~300-500 tokens; 1024 covers the tail
+  max_target_length: 384          # most FLAN targets are short
   cache_dir: /workspace/hf-cache
   tokenized_dir: /workspace/flan-tokenized   # skip re-tokenization on resume
 
 training:
   output_dir: /workspace/checkpoints/t5gemma-2-4b-flan-sft
   num_train_epochs: 1
-  per_device_train_batch_size: 4
-  per_device_eval_batch_size: 4
-  gradient_accumulation_steps: 8             # effective batch = 32
+  per_device_train_batch_size: 8             # doubled now that max_len is halved
+  per_device_eval_batch_size: 8
+  gradient_accumulation_steps: 4             # effective batch = 32
   learning_rate: 2.0e-4
   lr_scheduler_type: cosine
   warmup_ratio: 0.03
@@ -53,8 +53,8 @@ training:
   save_strategy: steps
   save_steps: 500
   save_total_limit: 3
-  predict_with_generate: true
-  generation_max_length: 512
+  predict_with_generate: false     # eval = forward pass only (loss); 10-50× faster
+  generation_max_length: 384       # unused when predict_with_generate=false; kept for merge-time use
   report_to: [wandb]
   run_name: t5gemma-2-4b-flan-sft
   seed: 42
