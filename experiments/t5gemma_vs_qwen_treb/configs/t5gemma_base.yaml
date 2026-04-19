@@ -9,7 +9,7 @@ model:
   revision: null              # always-latest main
   adapter: null
   dtype: bfloat16
-  attn_implementation: sdpa          # eager OOMs at 32K seq (O(seq^2) attn matrix); sdpa uses memory-efficient backend
+  attn_implementation: eager         # T5Gemma2 in transformers v5: fa2 unsupported, sdpa has shape-mismatch bug in enc-dec. Eager works but caps effective context at ~8K.
   device_map: auto
 
 generation:
