@@ -13,7 +13,7 @@ model:
   device_map: auto
 
 generation:
-  max_new_tokens: 512
+  max_new_tokens: 1024        # TCoT needs room for step-by-step + JSON output
   do_sample: false            # greedy — deterministic, reproducible
   num_beams: 1
   temperature: 1.0
@@ -23,7 +23,8 @@ eval:
   language: English           # English JSONs under English/*.json
   mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
   smoke_size: 100             # stratified across tasks when --smoke
-  batch_size: 8
+  batch_size: 32              # H100 NVL 94GB can easily handle this for a 4B enc-dec
+  max_input_tokens: 32768     # matches qwen context; fits comfortably with batch=32
 
 output:
   # Default is the network volume so results survive pod termination.

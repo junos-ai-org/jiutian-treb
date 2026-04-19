@@ -146,24 +146,43 @@ def run_hf_seq2seq(config: dict, samples: list[dict], use_peft: bool = False) ->
     model.eval()
 
     batch_size = config["eval"].get("batch_size", 8)
+    max_input_tokens = config["eval"].get("max_input_tokens", 32768)
     gen_kwargs = dict(
         max_new_tokens=g.get("max_new_tokens", 512),
         do_sample=g.get("do_sample", False),
         num_beams=g.get("num_beams", 1),
     )
-    outs: list[str] = []
+
+    # Length-sorted batching: tokenize all prompts up-front, sort by length
+    # ascending, process in batches of similar length, then unsort predictions
+    # to original order. Removes most of the padding waste that comes from
+    # TReB's wild length variance (200-char tables next to 80K-char tables).
+    texts_all = [build_prompt_tcot(s) for s in samples]
+    lens = [len(tokenizer.encode(t, add_special_tokens=False)) for t in texts_all]
+    sort_idx = sorted(range(len(samples)), key=lambda i: lens[i])
+    sorted_texts = [texts_all[i] for i in sort_idx]
+    print(f"[eval] lengths: min={min(lens)}  max={max(lens)}  median={sorted(lens)[len(lens)//2]}  "
+          f"batch_size={batch_size}  max_input={max_input_tokens}", flush=True)
+
+    sorted_outs: list[str] = [""] * len(samples)
     for i in range(0, len(samples), batch_size):
-        batch = samples[i:i + batch_size]
-        texts = [build_prompt_tcot(s) for s in batch]
+        batch_texts = sorted_texts[i:i + batch_size]
         enc = tokenizer(
-            texts, padding=True, truncation=True, max_length=2048, return_tensors="pt"
+            batch_texts, padding=True, truncation=True, max_length=max_input_tokens,
+            return_tensors="pt",
         ).to(model.device)
         with torch.no_grad():
             gen = model.generate(**enc, **gen_kwargs)
         decoded = tokenizer.batch_decode(gen, skip_special_tokens=True)
-        outs.extend(decoded)
+        for j, d in enumerate(decoded):
+            sorted_outs[i + j] = d
         if (i // batch_size) % 10 == 0:
-            print(f"[eval]   progress {i + len(batch)}/{len(samples)}", flush=True)
+            print(f"[eval]   progress {i + len(batch_texts)}/{len(samples)}", flush=True)
+
+    # Unsort: place each sorted output back at its original index
+    outs: list[str] = [""] * len(samples)
+    for sort_pos, orig_idx in enumerate(sort_idx):
+        outs[orig_idx] = sorted_outs[sort_pos]
     return outs
 
 
