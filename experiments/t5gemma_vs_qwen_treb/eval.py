@@ -105,11 +105,18 @@ def run_vllm(config: dict, samples: list[dict]) -> list[str]:
         trust_remote_code=True,
     )
     tokenizer = llm.get_tokenizer()
-    sp = SamplingParams(
+    sp_kwargs = dict(
         temperature=g.get("temperature", 0.0),
         top_p=g.get("top_p", 1.0),
         max_tokens=g.get("max_new_tokens", 512),
     )
+    # If a max input budget is set (e.g., to match a context-limited variant
+    # like T5Gemma @ 2K), truncate prompts from the right to that many tokens.
+    # vLLM's truncate_prompt_tokens keeps the first N tokens.
+    max_input = config["eval"].get("max_input_tokens")
+    if max_input:
+        sp_kwargs["truncate_prompt_tokens"] = max_input
+    sp = SamplingParams(**sp_kwargs)
     prompts = []
     for s in samples:
         msgs = [{"role": "user", "content": build_prompt_tcot(s)}]

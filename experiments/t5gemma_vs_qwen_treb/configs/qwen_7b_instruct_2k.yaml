@@ -1,0 +1,32 @@
+# Qwen 2.5 7B Instruct with INPUT TRUNCATED TO 2048 TOKENS.
+# Matches T5Gemma's effective context ceiling (which is capped at 2K by a
+# transformers v5 T5Gemma 2 sliding-window/padding bug). Lets us do an
+# apples-to-apples architecture comparison under matched input budgets.
+
+variant: qwen_7b_instruct_2k
+
+model:
+  backend: vllm
+  name_or_path: Qwen/Qwen2.5-7B-Instruct
+  revision: null
+  adapter: null
+  dtype: bfloat16
+  gpu_memory_utilization: 0.90
+  max_model_len: 4096          # 2048 input + 2048 gen budget
+  tensor_parallel_size: 1
+
+generation:
+  max_new_tokens: 2048
+  temperature: 0.0
+  top_p: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT
+  smoke_size: 100
+  max_input_tokens: 2048       # vLLM truncate_prompt_tokens — matches T5Gemma budget
+
+output:
+  predictions_path: /workspace/results/qwen_7b_instruct_2k/predictions.jsonl
+  metrics_path: /workspace/results/qwen_7b_instruct_2k/metrics.json

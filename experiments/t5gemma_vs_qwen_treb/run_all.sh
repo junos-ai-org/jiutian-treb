@@ -23,6 +23,7 @@ mkdir -p /workspace/logs /workspace/results
 # variant → "config_path" (GPU is assigned positionally at runtime)
 declare -A CONFIG_OF=(
   [qwen]="configs/qwen_7b_instruct.yaml"
+  [qwen_2k]="configs/qwen_7b_instruct_2k.yaml"
   [t5gemma_base]="configs/t5gemma_base.yaml"
   [t5gemma_sft]="configs/t5gemma_sft.yaml"
 )
