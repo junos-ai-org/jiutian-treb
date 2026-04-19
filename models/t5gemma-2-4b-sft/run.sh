@@ -21,7 +21,10 @@ if [[ -n "${PUBLIC_KEY:-}" ]]; then
 fi
 if command -v sshd >/dev/null 2>&1; then
   mkdir -p /run/sshd
-  /usr/sbin/sshd 2>/dev/null || true
+  # Base image ships without host keys; generate them so sshd doesn't
+  # bail with "no hostkeys available -- exiting".
+  ssh-keygen -A >/dev/null 2>&1 || true
+  /usr/sbin/sshd
   echo "[run.sh] sshd started"
 fi
 
