@@ -11,7 +11,7 @@ model:
   dtype: bfloat16
   # vLLM-specific
   gpu_memory_utilization: 0.90
-  max_model_len: 8192         # TReB prompts fit comfortably
+  max_model_len: 32768        # Qwen 2.5 native context. Some TReB prompts are >32K — eval.py truncates oversize tables.
   tensor_parallel_size: 1     # 7B fits on 1× H100; bump to 2 if we want faster wall-clock
 
 generation:

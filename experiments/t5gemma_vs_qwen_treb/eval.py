@@ -67,12 +67,18 @@ def load_treb(dataset_id: str, language: str, smoke_n: int | None = None) -> lis
     return samples
 
 
+MAX_TABLE_CHARS = 80000  # ~20-25K tokens; leaves headroom in Qwen's 32K context.
+
+
 def build_prompt_tcot(sample: dict) -> str:
+    table_md = sample["table_markdown"]
+    if len(table_md) > MAX_TABLE_CHARS:
+        table_md = table_md[:MAX_TABLE_CHARS] + "\n... [table truncated for length] ..."
     parts = [sample["instruction"]]
     if sample["title"]:
         parts.append(sample["title"])
-    if sample["table_markdown"]:
-        parts.append(sample["table_markdown"])
+    if table_md:
+        parts.append(table_md)
     parts.append(f"Question: {sample['question']}")
     parts.append(
         'Reason step by step. Then output ONLY a single JSON object on the last line: {"answer": <value>}'
