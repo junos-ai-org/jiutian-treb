@@ -9,7 +9,7 @@ model:
   revision: null              # always-latest main
   adapter: null
   dtype: bfloat16
-  attn_implementation: eager  # see flash-attn investigation; fall back to eager if fa2 crashes
+  attn_implementation: sdpa          # eager OOMs at 32K seq (O(seq^2) attn matrix); sdpa uses memory-efficient backend
   device_map: auto
 
 generation:
@@ -23,7 +23,7 @@ eval:
   language: English           # English JSONs under English/*.json
   mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
   smoke_size: 100             # stratified across tasks when --smoke
-  batch_size: 32              # H100 NVL 94GB can easily handle this for a 4B enc-dec
+  batch_size: 16              # dropped from 32 after sdpa+32K OOM margin check
   max_input_tokens: 32768     # matches qwen context; fits comfortably with batch=32
 
 output:

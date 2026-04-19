@@ -11,7 +11,7 @@ model:
     repo_id: DiffusionTableQA/t5gemma-2-4b-flan-sft-ddp
     revision: abae90a8         # run-1 final "Model save" @ 2026-04-19 03:39:46
   dtype: bfloat16
-  attn_implementation: eager
+  attn_implementation: sdpa          # eager OOMs at 32K seq (O(seq^2) attn matrix); sdpa uses memory-efficient backend
   device_map: auto
 
 generation:
@@ -25,7 +25,7 @@ eval:
   language: English
   mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
   smoke_size: 100
-  batch_size: 32
+  batch_size: 16              # dropped from 32 after sdpa+32K OOM margin check
   max_input_tokens: 32768
 
 output:
