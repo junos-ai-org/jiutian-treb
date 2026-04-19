@@ -14,6 +14,34 @@ Narrative journal for the encoder-vs-decoder TReB experiment. Append newest entr
 
 ---
 
+## 2026-04-19 — Full runs launched (A100 + 4× H100 DDP in parallel)
+**Status**: in-progress
+**What happened**: Launched two parallel full-FLAN SFT runs — an A100 baseline and an aggressive 4× H100 DDP variant. Both writing to the same wandb project.
+
+**A100 run** (pod `igd5cee414zi5c`, US-WA-1, $1.49/hr):
+- Config `configs/sft_flan.yaml`: batch=8, grad_accum=4 (effective=32), max_in=1024, max_tgt=384, LR=2e-4, cosine, warmup=0.03, `predict_with_generate=false`.
+- Revised wall-clock measurement: **12.3 s/step** — my original 3 h estimate was way off. Real ETA ~10.7 h, cost ~$15.95. Cause: T5Gemma 2 is encoder-decoder; each step runs both encoder AND decoder forwards, ~2× compute vs a same-size decoder-only.
+- Hub target: `DiffusionTableQA/t5gemma-2-4b-flan-sft`
+- Wandb: [l551vomo](https://wandb.ai/junos/treb-encoder-vs-decoder/runs/l551vomo)
+
+**DDP run** (pod `0rcddmeaunsklh`, EU-NL-1, $11.96/hr for 4× H100):
+- Config `configs/sft_flan_ddp.yaml`: batch=8 per-GPU, grad_accum=4, 4 GPUs → effective=128, LR=4e-4 (sqrt scaling), warmup=0.05.
+- Launcher: `torchrun --standalone --nproc_per_node=4 train.py`. HF Trainer auto-detected DDP; no other code changes.
+- Measured: **7.8 s/step** → ETA ~1.7 h, cost ~$20.33. ~6× faster than the A100 for comparable total spend.
+- Hub target: `DiffusionTableQA/t5gemma-2-4b-flan-sft-ddp` (separate repo so the two runs don't step on each other).
+- Wandb: [7s7i24cw](https://wandb.ai/junos/treb-encoder-vs-decoder/runs/7s7i24cw)
+
+Path to launch the DDP: after deciding on effective=128, needed to create a 200 GB volume in an enum-accessible DC. US-MO-1 (Medium H100 stock) is rejected by `POST /pods` despite being valid for `POST /networkvolumes` — had to delete that volume and create one in EU-NL-1 instead. Captured this in `docs/learnings.md` and the `runpod-training-pipeline` skill.
+
+**Decisions**: Keep both runs for safety + direct comparison of effective batch 32 vs 128 on this model/data.
+**Next**: Wait ~1.7 h for DDP to finish. If clean, merge adapter and push merged model. A100 stays as an overnight backup.
+**Artifacts**:
+- US-WA-1 volume: `l6pnvotcgk` (has cached base model from earlier runs)
+- EU-NL-1 volume: `8uj8ouz5es` (fresh; re-downloads base and tokenizes on first boot)
+- Image: `achithanar/t5gemma-sft:6d01d94` (has NUM_GPUS/torchrun launcher + CODE_REPO + sshd + log-to-volume)
+
+---
+
 ## 2026-04-19 — Smoke test PASSED; pipeline end-to-end works
 **Status**: done
 **What happened**: Smoke on the first real run (pod `byupl3n709221y`, image `c1de6d9`) finished all 50 steps and saved the adapter — we didn't know at the time because logs weren't tee'd to the volume. Confirmed by SSHing into a fresh inspect pod (`849tj18meu7xll`) and reading `/workspace/checkpoints/t5gemma-2-4b-flan-sft-smoke/checkpoint-50/trainer_state.json`.
