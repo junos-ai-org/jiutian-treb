@@ -14,6 +14,35 @@ Narrative journal for the encoder-vs-decoder TReB experiment. Append newest entr
 
 ---
 
+## 2026-04-19 — DDP restart-loop bug + eval harness scaffolded
+**Status**: in-progress
+**What happened**:
+- Confirmed DDP run 1 finished cleanly and pushed final adapter to Hub (`DiffusionTableQA/t5gemma-2-4b-flan-sft-ddp` commit `abae90a8` at 03:39:46).
+- **Restart-loop bug**: pod's container exited with 0 after `run.sh` finished; RunPod's default restart policy re-ran it twice more before I noticed. Runs 2 and 3 also completed (commits `429bcef8` at 05:16, `18075f97` at 06:51). User terminated pod `0rcddmeaunsklh` via RunPod API at ~07:46. Wasted GPU cost: ~$68 (2 × 1.5 h × $11.96/hr).
+- Fix shipped: `models/t5gemma-2-4b-sft/run.sh` now defaults to `exec tail -f /dev/null` after training; set `AUTO_TERMINATE=1` to exit instead.
+- Scaffolded `experiments/t5gemma_vs_qwen_treb/` (README + 3 configs + eval.py + score.py + run.sh) and two Docker images (`docker/t5gemma-eval/`, `docker/qwen-eval/`) with a matrix GHA workflow. Adapter pinned to run-1 `abae90a8` in `t5gemma_sft.yaml`.
+- Persisted `OPENROUTER_API_KEY` + `HF_TOKEN` to `~/.claude/.env` (mode 600) alongside RUNPOD key. Score path uses DeepSeek V3 via OpenRouter for LLM-as-Judge (~$5–10 for full run vs ~$100 hosting Qwen2-72B).
+
+**Decisions**:
+- Eval first pass: English only (3,895 samples), TCoT mode only, 4× H100, three variants in parallel. Defer PoT/ICoT and Chinese.
+- Two Dockerfiles (vLLM for Qwen / transformers v5 + peft for T5Gemma) — version conflict is real.
+- Pin SFT adapter to `abae90a8` (run-1 final) for clean provenance even though run-3 is quality-equivalent.
+
+**Next**:
+- Push to trigger GHA image builds.
+- Attach volume `l6pnvotcgk` (US-WA-1, has base model cached) to an eval pod.
+- Flash-attn investigation on T5Gemma 2 (current learnings say eager required; retest under v5).
+- Smoke test 100 samples per variant.
+
+**Artifacts**:
+- `experiments/t5gemma_vs_qwen_treb/{README.md,eval.py,score.py,run.sh,configs/*.yaml}`
+- `docker/{t5gemma-eval,qwen-eval}/{Dockerfile,requirements.txt}`
+- `.github/workflows/build-eval-images.yml`
+- Hub: `DiffusionTableQA/t5gemma-2-4b-flan-sft-ddp@abae90a8` (SFT adapter)
+- Secrets: `~/.claude/.env` now has RUNPOD_API_KEY, OPENROUTER_API_KEY, HF_TOKEN
+
+---
+
 ## 2026-04-19 — Full runs launched (A100 + 4× H100 DDP in parallel)
 **Status**: in-progress
 **What happened**: Launched two parallel full-FLAN SFT runs — an A100 baseline and an aggressive 4× H100 DDP variant. Both writing to the same wandb project.

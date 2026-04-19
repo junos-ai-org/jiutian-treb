@@ -1,0 +1,82 @@
+name: Build TReB eval images
+
+# Builds two Docker Hub images:
+#   - achithanar/treb-eval-t5gemma  (transformers v5 + peft + bnb)
+#   - achithanar/treb-eval-qwen     (vllm)
+# Separate images because vLLM pins transformers<5 while T5Gemma 2 needs >=5.
+#
+# Triggers:
+#   - push touching experiments/t5gemma_vs_qwen_treb/**, docker/{t5gemma,qwen}-eval/**,
+#     or this workflow
+#   - manual dispatch with optional extra tag
+
+on:
+  push:
+    branches: [experiment-setup, main]
+    paths:
+      - 'experiments/t5gemma_vs_qwen_treb/**'
+      - 'docker/t5gemma-eval/**'
+      - 'docker/qwen-eval/**'
+      - '.github/workflows/build-eval-images.yml'
+  workflow_dispatch:
+    inputs:
+      extra_tag:
+        description: 'Optional extra tag (applied to both images)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: achithanar/treb-eval-t5gemma
+            dockerfile: docker/t5gemma-eval/Dockerfile
+          - image: achithanar/treb-eval-qwen
+            dockerfile: docker/qwen-eval/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute tags
+        id: tags
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          SHA="${GITHUB_SHA::7}"
+          TAGS="${IMAGE}:${SHA}"
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            TAGS="${TAGS},${IMAGE}:latest"
+          fi
+          if [[ -n "${{ github.event.inputs.extra_tag }}" ]]; then
+            TAGS="${TAGS},${IMAGE}:${{ github.event.inputs.extra_tag }}"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "pinned=${IMAGE}:${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push (${{ matrix.image }})
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Summary
+        run: |
+          echo "### Pushed ${{ matrix.image }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pinned: \`${{ steps.tags.outputs.pinned }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "All tags: \`${{ steps.tags.outputs.tags }}\`" >> "$GITHUB_STEP_SUMMARY"

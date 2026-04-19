@@ -209,3 +209,6 @@ __marimo__/
 # Claude Code local settings (machine-specific, not for sharing)
 .claude/
 
+# Experiment raw outputs (predictions, large artifacts) — commit only the analysis under insights/
+experiments/*/results/
+

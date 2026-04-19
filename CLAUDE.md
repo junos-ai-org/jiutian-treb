@@ -30,17 +30,25 @@ Detailed reference material lives in `~/.claude/knowledgebase/`:
 - `treb/t5gemma-sft.kb` — SFT training guide (Seq2SeqTrainer, QLoRA, RunPod setup)
 - `mmtu/experiments.kb` — MMTU experiment framework reference
 
-## Current Experiment: Encoder vs Decoder on TReB
+## Code layout
 
-**Goal**: Compare T5Gemma 2 4B-4B (encoder-decoder) vs Qwen-Instruct (decoder-only) on table reasoning.
+- `models/<name>/` — model training code (e.g. `models/t5gemma-2-4b-sft/` for SFT)
+- `experiments/<name>/` — evaluation experiments (see convention below)
 
-**Status**: Research deep-dive complete. Next: scaffold code and run SFT.
+## Experiment convention
 
-**Key decisions**:
-- SFT T5Gemma 2 on FLAN only (no TableInstruct — fair comparison)
-- Use Seq2SeqTrainer + QLoRA (SFTTrainer doesn't support encoder-decoder)
-- RunPod A100 80GB for training (~$8-9)
-- `models/t5gemma-2-4b-sft/` for SFT code, `experiments/encoder_vs_decoder/` for benchmark
+Evaluation experiments live under `experiments/<name>/` with snake_case names. Layout:
+
+```
+experiments/<name>/
+├── README.md        # Hypothesis, setup, how to run, status, TL;DR of findings
+├── configs/         # One YAML per variant (e.g. qwen_7b_instruct.yaml, t5gemma_sft.yaml)
+├── run.sh           # Entrypoint; accepts a config path arg to pick the variant
+├── results/         # Raw eval outputs (predictions.jsonl, metrics.json) — gitignored
+└── insights/        # Analysis markdown, plots, writeups — committed
+```
+
+See `experiments/README.md` for the full spec and a minimal template.
 
 ## Logging
 

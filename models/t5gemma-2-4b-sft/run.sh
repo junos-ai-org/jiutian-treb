@@ -2,13 +2,16 @@
 # Pod entrypoint.
 #
 # Env vars:
-#   CONFIG   — path to YAML config (default: configs/sft_flan.yaml)
-#   RESUME   — if set, pass --resume to train.py
-#   DEV      — if set to 1, sleep forever after training (keep pod alive
-#              for SSH/debugging). Costs $$ while idle.
+#   CONFIG          — path to YAML config (default: configs/sft_flan.yaml)
+#   RESUME          — if set, pass --resume to train.py
+#   AUTO_TERMINATE  — if set to 1, `exit $TRAIN_EXIT` after training so
+#                     RunPod can tear down the pod. Default is to idle
+#                     (tail -f /dev/null) — prevents the container-restart
+#                     loop that runs training again and burns GPU hours.
+#   DEV             — alias for AUTO_TERMINATE=0 (kept for backward compat).
 #   CODE_REPO / CODE_REF — if set, git-clone into /workspace/code and run
-#              from there instead of the baked-in /opt/sft code. Lets us
-#              iterate on train.py without rebuilding the image.
+#                     from there instead of the baked-in /opt/sft code.
+#                     Lets us iterate on train.py without rebuilding the image.
 set -euo pipefail
 
 # --- SSH bring-up ---------------------------------------------------------
@@ -27,6 +30,23 @@ if command -v sshd >/dev/null 2>&1; then
   /usr/sbin/sshd
   echo "[run.sh] sshd started"
 fi
+
+# --- Persist pod env to .bashrc for SSH sessions -------------------------
+# RunPod injects env vars into the pod's initial process, but a fresh SSH
+# shell doesn't inherit them. Write them to .bashrc so interactive and
+# login shells pick them up automatically. Single-tenant pod — fine to
+# stash secrets in .bashrc.
+{
+  echo "# Injected by run.sh at $(date -Iseconds)"
+  for var in HF_TOKEN WANDB_API_KEY WANDB_PROJECT HF_HOME HF_DATASETS_CACHE \
+             TRANSFORMERS_CACHE HF_HUB_ENABLE_HF_TRANSFER HF_XET_HIGH_PERFORMANCE; do
+    val="${!var:-}"
+    if [[ -n "$val" ]]; then
+      printf 'export %s=%q\n' "$var" "$val"
+    fi
+  done
+} >> /root/.bashrc
+echo "[run.sh] pod env persisted to /root/.bashrc"
 
 # --- Log to volume so it survives container exits ------------------------
 mkdir -p /workspace/logs
@@ -82,10 +102,14 @@ TRAIN_EXIT=$?
 set -e
 echo "[run.sh] train.py exited with code $TRAIN_EXIT"
 
-# --- Keep pod alive in dev mode for post-mortem -------------------------
-if [[ "${DEV:-}" == "1" ]]; then
-  echo "[run.sh] DEV=1 — sleeping forever so the pod stays reachable via SSH"
-  exec tail -f /dev/null
+# --- Idle by default so RunPod doesn't restart-loop -------------------------
+# RunPod's default container restart policy re-runs the entrypoint when it
+# exits. If training succeeds (exit 0) we'd silently start another full
+# training run and burn GPU hours — which bit us once ($68 of wasted DDP
+# time across 3 back-to-back runs). Idle unless AUTO_TERMINATE=1.
+if [[ "${AUTO_TERMINATE:-}" == "1" ]]; then
+  echo "[run.sh] AUTO_TERMINATE=1 — exiting with code $TRAIN_EXIT"
+  exit "$TRAIN_EXIT"
 fi
-
-exit "$TRAIN_EXIT"
+echo "[run.sh] train.py done; pod is idling. Set AUTO_TERMINATE=1 to exit instead."
+exec tail -f /dev/null

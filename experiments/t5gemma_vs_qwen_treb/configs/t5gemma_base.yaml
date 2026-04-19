@@ -1,0 +1,32 @@
+# T5Gemma 2 4B-4B pretrained (no SFT) — zero-floor baseline on TReB.
+# Google only released the pretrained checkpoint; no instruction-tuned variant.
+
+variant: t5gemma_base
+
+model:
+  backend: hf_seq2seq        # HF transformers AutoModelForSeq2SeqLM
+  name_or_path: google/t5gemma-2-4b-4b
+  revision: null              # always-latest main
+  adapter: null
+  dtype: bfloat16
+  attn_implementation: eager  # see flash-attn investigation; fall back to eager if fa2 crashes
+  device_map: auto
+
+generation:
+  max_new_tokens: 512
+  do_sample: false            # greedy — deterministic, reproducible
+  num_beams: 1
+  temperature: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English           # English JSONs under English/*.json
+  mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
+  smoke_size: 100             # stratified across tasks when --smoke
+  batch_size: 8
+
+output:
+  # Default is the network volume so results survive pod termination.
+  # Override to a local path when running outside a pod.
+  predictions_path: /workspace/results/t5gemma_base/predictions.jsonl
+  metrics_path: /workspace/results/t5gemma_base/metrics.json

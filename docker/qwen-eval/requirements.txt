@@ -1,0 +1,8 @@
+# Qwen eval stack — vLLM pulls its own pinned transformers (typically <5).
+# That's fine: this image never loads T5Gemma 2.
+vllm>=0.6.3
+huggingface_hub[hf_transfer]>=0.28.0
+rouge-score>=0.1.2
+httpx>=0.27.0
+pyyaml>=6.0
+wandb>=0.18.0

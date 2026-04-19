@@ -1,0 +1,32 @@
+# T5Gemma 2 4B-4B + our FLAN-SFT LoRA adapter.
+# Adapter pinned to run-1 final on Hub for clean provenance.
+
+variant: t5gemma_sft
+
+model:
+  backend: hf_seq2seq_peft    # HF transformers + peft PeftModel wrapper
+  name_or_path: google/t5gemma-2-4b-4b
+  revision: null
+  adapter:
+    repo_id: DiffusionTableQA/t5gemma-2-4b-flan-sft-ddp
+    revision: abae90a8         # run-1 final "Model save" @ 2026-04-19 03:39:46
+  dtype: bfloat16
+  attn_implementation: eager
+  device_map: auto
+
+generation:
+  max_new_tokens: 512
+  do_sample: false
+  num_beams: 1
+  temperature: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
+  smoke_size: 100
+  batch_size: 8
+
+output:
+  predictions_path: /workspace/results/t5gemma_sft/predictions.jsonl
+  metrics_path: /workspace/results/t5gemma_sft/metrics.json
