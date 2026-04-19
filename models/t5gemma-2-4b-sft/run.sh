@@ -65,8 +65,15 @@ else
   echo "[run.sh] reusing tokenized data at $TOKENIZED"
 fi
 
-TRAIN_CMD=(python train.py --config "$CONFIG")
+# Multi-GPU: launch via torchrun when NUM_GPUS>1. Trainer auto-detects DDP.
+NUM_GPUS="${NUM_GPUS:-1}"
+if [[ "$NUM_GPUS" -gt 1 ]]; then
+  TRAIN_CMD=(torchrun --standalone --nproc_per_node="$NUM_GPUS" train.py --config "$CONFIG")
+else
+  TRAIN_CMD=(python train.py --config "$CONFIG")
+fi
 [[ -n "${RESUME:-}" ]] && TRAIN_CMD+=(--resume)
+echo "[run.sh] NUM_GPUS=$NUM_GPUS"
 echo "[run.sh] ${TRAIN_CMD[*]}"
 
 set +e
