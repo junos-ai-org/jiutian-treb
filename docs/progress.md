@@ -14,6 +14,32 @@ Narrative journal for the encoder-vs-decoder TReB experiment. Append newest entr
 
 ---
 
+## 2026-04-19 — Smoke test PASSED; pipeline end-to-end works
+**Status**: done
+**What happened**: Smoke on the first real run (pod `byupl3n709221y`, image `c1de6d9`) finished all 50 steps and saved the adapter — we didn't know at the time because logs weren't tee'd to the volume. Confirmed by SSHing into a fresh inspect pod (`849tj18meu7xll`) and reading `/workspace/checkpoints/t5gemma-2-4b-flan-sft-smoke/checkpoint-50/trainer_state.json`.
+
+Loss curve (50 steps, 200 FLAN samples, QLoRA r=16):
+| step | train loss | eval loss |
+|-----:|-----------:|----------:|
+| 5    | 7.93       | —         |
+| 25   | 0.96       | 0.78      |
+| 50   | 0.49       | 0.32      |
+
+Adapter `adapter_model.safetensors` is 273 MB with LoRA targets: `q/k/v/o_proj`, `fc1/fc2`, `gate/up/down_proj`, `self_attn.out_proj`. 68.3M trainable / 7.58B total = 0.90%.
+
+Dev-loop improvements deployed in image `c1de6d9`:
+- **run.sh** now generates sshd host keys (`ssh-keygen -A`), starts sshd, injects `$PUBLIC_KEY`, tees all output to `/workspace/logs/<timestamp>.log` (survives container death), supports `CODE_REPO`/`CODE_REF` for git-on-volume iteration (skip image rebuild for code-only changes), and `DEV=1` to keep the pod alive after training.
+- Now able to SSH directly from this Claude container via `/root/.ssh/runpod_key` — no more "paste the logs" round-trips.
+- Previous painful bugs captured: `datasets.load_dataset` pulls all 2157 shards unless `streaming=True`; `DataCollatorForSeq2Seq(model=...)` crashes on T5Gemma2 because `prepare_decoder_input_ids_from_labels` has a bad signature (drop `model=` to let the model shift labels internally); base image has no SSH host keys; `/workspace` mount shadows code, so code lives at `/opt/sft`.
+
+**Decisions**: Smoke validated; moving to full FLAN SFT.
+**Next**: Launch full run with `configs/sft_flan.yaml` (100K samples, 1 epoch, `push_to_hub=true` → `DiffusionTableQA/t5gemma-2-4b-flan-sft`). Estimated ~4–6 hours at $1.49/hr on A100 SXM 80GB.
+**Artifacts**:
+- Volume `l6pnvotcgk` holds: `hf-cache/` (T5Gemma 2 base weights cached ~17 GB), `flan-tokenized-smoke/` (3.7 MB), `checkpoints/t5gemma-2-4b-flan-sft-smoke/` with adapter + checkpoint-50, `logs/20260419-011045.log`.
+- Image: `achithanar/t5gemma-sft:c1de6d9`
+
+---
+
 ## 2026-04-18 — Smoke pod launched
 **Status**: in-progress
 **What happened**:
