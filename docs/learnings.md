@@ -163,3 +163,84 @@ Verified flow (confirmed by pushing the smoke adapter on 2026-04-19):
 **Always verify push capability BEFORE the full run.** A 6-hour SFT that
 crashes at save_steps=500 on a token scope issue is a bad day. Push a
 1-byte file to the target repo first.
+
+## RunPod API inconsistencies
+
+RunPod has three surfaces (REST pods, REST volumes, GraphQL) that disagree
+about which data centers exist. Concretely, as of 2026-04-19:
+
+- `GET /dataCenters` (graphql) lists `US-MO-1`, `US-NE-1`, `US-MO-2`
+  with `storageSupport: True`.
+- `POST /networkvolumes` accepts those DC IDs and creates the volume.
+- **`POST /pods` has an `enum` on `dataCenterIds` that doesn't include
+  them**, so the pod request is rejected even though the volume is
+  there waiting.
+
+Workflow: **always cross-check the pod-create enum before creating a
+network volume**, or you'll end up with an orphan volume in an
+inaccessible DC. The enum from the error response is the source of
+truth for pod DCs. Currently missing from the pod enum (but listed by
+graphql): `US-MO-1`, `US-MO-2`, `US-NE-1`.
+
+Practical implication: 4× H100 stock in US-MO-1 (Medium) is unreachable
+for us; 4× H100 in enum-accessible DCs is Low stock in EU-NL-1,
+EUR-IS-3, US-NE-1 only.
+
+## Wall-clock reality for T5Gemma 2 4B-4B QLoRA
+
+Measured on 1× A100 SXM 80GB, batch=8, grad_accum=4 (effective 32),
+max_input=1024, max_target=384, bf16, paged_adamw_8bit, grad checkpointing,
+`predict_with_generate=false`, attn=eager:
+
+**~12.3 s/step → ~10.7 h for 100K samples, 1 epoch, 3125 steps.**
+
+Why encoder-decoder is slower than a decoder-only of the same param
+count: the step runs both an encoder forward AND a decoder forward
+(plus the decoder's cross-attention over the encoder output), roughly
+2× the compute per step. Budget accordingly.
+
+H100 is ~2× an A100 on this workload → ~5.4 h for the same config on 1×
+H100. DDP scaling is near-linear for the forward/backward but each
+optimizer step has an all-reduce, so raising effective batch (fewer
+optimizer steps) saves more time than adding GPUs at fixed effective
+batch.
+
+## Iteration loop: CODE_REPO mode eliminates image rebuilds for code-only changes
+
+`run.sh` supports `CODE_REPO` + `CODE_REF` env vars; when set, the pod
+git-clones the repo to `/workspace/code` and `cd`s in. Every restart
+does a `git pull`. Verified working — the full SFT pod picked up commit
+`8895b37` (config change) without a rebuild.
+
+Caveats:
+- `requirements.txt` changes still need a rebuild (deps are in the image).
+- `run.sh` changes need a rebuild (run.sh itself is baked into the image
+  and used to launch CODE_REPO mode).
+- Repo must be public, or add credential helper for private repos.
+
+## wandb in the pod: just set `WANDB_API_KEY`
+
+Don't call `wandb login` in `run.sh`. Setting `WANDB_API_KEY=<key>` and
+`WANDB_PROJECT=<project>` as pod env vars is enough — Trainer's wandb
+callback reads them at `report_to=["wandb"]` init time and logs in
+automatically. Verified working on 2026-04-19.
+
+## DDP with HF Trainer: just use `torchrun`
+
+No code changes required in `train.py`. Trainer auto-detects world size,
+handles per-GPU data sharding, and makes rank 0 the sole saver/pusher.
+All that's needed in `run.sh`:
+
+```bash
+if [[ "${NUM_GPUS:-1}" -gt 1 ]]; then
+  torchrun --standalone --nproc_per_node="$NUM_GPUS" train.py --config "$CONFIG"
+else
+  python train.py --config "$CONFIG"
+fi
+```
+
+When scaling effective batch with DDP, **sqrt-scale the learning rate**
+from your 1-GPU baseline (`lr_new = lr_base × √(batch_new / batch_base)`)
+and bump `warmup_ratio` slightly — raising batch 4× at the same LR is
+usually fine for LoRA; linear scaling (4×) is more aggressive than
+needed.
