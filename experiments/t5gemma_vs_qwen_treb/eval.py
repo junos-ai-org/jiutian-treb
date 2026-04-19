@@ -138,6 +138,11 @@ def run_hf_seq2seq(config: dict, samples: list[dict], use_peft: bool = False) ->
         from peft import PeftModel
         a = m["adapter"]
         model = PeftModel.from_pretrained(model, a["repo_id"], revision=a.get("revision") or None)
+        # merge_and_unload folds LoRA deltas into base weights and returns a
+        # plain AutoModelForSeq2SeqLM. Without this, PEFT wraps every linear
+        # layer in Python at inference — ~2-3× slowdown vs the base model.
+        model = model.merge_and_unload()
+        print(f"[eval] PEFT adapter merged into base weights (merge_and_unload)")
     model.eval()
 
     batch_size = config["eval"].get("batch_size", 8)
