@@ -15,7 +15,7 @@ model:
   tensor_parallel_size: 1     # 7B fits on 1× H100; bump to 2 if we want faster wall-clock
 
 generation:
-  max_new_tokens: 1024        # TCoT needs room for step-by-step + JSON output
+  max_new_tokens: 2048        # TCoT multi-step reasoning + JSON often exceeds 1024
   temperature: 0.0            # greedy via temp=0 in vLLM
   top_p: 1.0
 

@@ -67,10 +67,11 @@ def load_treb(dataset_id: str, language: str, smoke_n: int | None = None) -> lis
     return samples
 
 
-MAX_TABLE_CHARS = 40000  # ~10-15K tokens. Dense markdown tables tokenize poorly
-                         # (every pipe/dash is its own token), so we stay well
-                         # under Qwen's 32K context. First pass at 80K still
-                         # produced a 32,769-token prompt — hence this lower cap.
+MAX_TABLE_CHARS = 30000  # Conservative — some dense TReB tables tokenize at
+                         # nearly 1 token per char (wall-of-pipes markdown), so
+                         # 40K chars still produced >32K token prompts. 30K chars
+                         # gives a safe upper bound well inside Qwen's 32K window
+                         # (with 2048 reserved for generation).
 
 
 def build_prompt_tcot(sample: dict) -> str:
