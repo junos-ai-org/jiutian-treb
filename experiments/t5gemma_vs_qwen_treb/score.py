@@ -97,16 +97,40 @@ FAILURE_MODES = [
 
 
 def _judge_prompt(s: dict) -> str:
+    """Two prompt modes: reference-based (gold answer known) vs constraint-
+    satisfaction (gold empty — e.g. TReB's Instruction_Following task, where
+    the question itself specifies the constraints and there's no fixed gold)."""
     modes = "\n".join(f"  - {m}" for m in FAILURE_MODES)
+    gold = (s.get("gold_answer") or "").strip()
+    if gold:
+        return (
+            "You are evaluating a language model's answer to a table-reasoning question.\n\n"
+            f"Question: {s['question']}\n"
+            f"Gold answer: {gold}\n"
+            f"Model answer: {s['prediction']}\n\n"
+            "Score 0-10:\n"
+            "  0  wrong / unrelated / no answer\n"
+            "  5  partially correct (right direction, wrong detail)\n"
+            "  10 fully correct (semantically equivalent to gold)\n\n"
+            "Classify the model's output into exactly one category:\n"
+            f"{modes}\n\n"
+            'Reply with ONLY a JSON object:\n'
+            '{"score": <int 0-10>, "mode": "<one of the categories above>", '
+            '"rationale": "<one sentence>"}'
+        )
+    # No gold answer — judge constraint satisfaction from the question alone.
     return (
-        "You are evaluating a language model's answer to a table-reasoning question.\n\n"
+        "You are evaluating whether a language model's answer satisfies the "
+        "constraints stated in the question (no reference answer is provided).\n\n"
         f"Question: {s['question']}\n"
-        f"Gold answer: {s['gold_answer']}\n"
         f"Model answer: {s['prediction']}\n\n"
+        "Parse the question carefully — it specifies exact constraints (length, "
+        "format, content, language, etc.). Judge ONLY by whether the model's "
+        "answer satisfies those constraints.\n\n"
         "Score 0-10:\n"
-        "  0  wrong / unrelated / no answer\n"
-        "  5  partially correct (right direction, wrong detail)\n"
-        "  10 fully correct (semantically equivalent to gold)\n\n"
+        "  0  ignores or violates most constraints\n"
+        "  5  satisfies some constraints, misses others\n"
+        "  10 satisfies every stated constraint exactly\n\n"
         "Classify the model's output into exactly one category:\n"
         f"{modes}\n\n"
         'Reply with ONLY a JSON object:\n'
@@ -218,11 +242,19 @@ def aggregate(samples: list[dict], use_judge: bool) -> dict[str, Any]:
         by_task[s["task"]].append(s)
 
     def task_metrics(items: list[dict]) -> dict:
-        out = {
-            "n": len(items),
-            "em": _mean([s["_em"] for s in items]),
-            "rouge_l": _mean([s["_rouge"] for s in items if s["_rouge"] >= 0]),
-        }
+        out: dict[str, Any] = {"n": len(items)}
+        # Reference-based metrics skip samples without a gold answer.
+        em_vals = [s["_em"] for s in items if s.get("_em") is not None]
+        rouge_vals = [s["_rouge"] for s in items if s.get("_rouge") is not None and s["_rouge"] >= 0]
+        no_gold_n = sum(1 for s in items if s.get("_no_gold"))
+        if em_vals:
+            out["em"] = _mean(em_vals)
+            out["em_n"] = len(em_vals)
+        if rouge_vals:
+            out["rouge_l"] = _mean(rouge_vals)
+            out["rouge_n"] = len(rouge_vals)
+        if no_gold_n:
+            out["no_gold_n"] = no_gold_n
         numeric_scored = [s["_numeric"] for s in items if "_numeric" in s]
         if numeric_scored:
             out["numeric_match"] = _mean(numeric_scored)
@@ -282,11 +314,16 @@ def log_to_wandb(
         cols.extend(["judge_score", "judge_mode", "judge_rationale"])
     table = wandb.Table(columns=cols)
     for s in samples:
+        # None → -1 so wandb columns stay numeric. Filter `em == -1` in UI to
+        # exclude reference-free samples from reference-match analyses.
+        em_val = s.get("_em")
+        rouge_val = s.get("_rouge")
         row = [
             s.get("id", ""), s.get("task", ""), s.get("variant", variant),
             s.get("question", ""), s.get("gold_answer", ""), s.get("prediction", ""),
             s.get("_pred_extracted", ""),
-            s.get("_em", -1.0), s.get("_rouge", -1.0),
+            em_val if em_val is not None else -1.0,
+            rouge_val if rouge_val is not None else -1.0,
         ]
         if "numeric_match" in cols:
             row.append(s.get("_numeric", -1.0))
@@ -320,13 +357,27 @@ def main() -> None:
     variant = samples[0].get("variant", "unknown") if samples else "unknown"
     print(f"[score] {len(samples)} predictions from {preds_path} (variant={variant})")
 
+    # EM and ROUGE-L require a non-empty gold. Some TReB tasks (notably
+    # Instruction_Following, 90 samples) have empty `answer` — the task is
+    # reference-free, judged by constraint satisfaction from the question.
+    # Mark those samples with `_em=None, _rouge=None, _no_gold=True` so they
+    # drop out of reference-match aggregation but still get judged.
     for s in samples:
         extracted = extract_json_answer(s.get("prediction", ""))
         s["_pred_extracted"] = extracted
-        s["_em"] = exact_match(extracted, s.get("gold_answer", ""))
-        s["_rouge"] = rouge_l(extracted, s.get("gold_answer", ""))
-        if s.get("number_answer") is not None:
-            s["_numeric"] = numeric_match(extracted, float(s["number_answer"]))
+        gold = (s.get("gold_answer") or "").strip()
+        if gold:
+            s["_em"] = exact_match(extracted, gold)
+            s["_rouge"] = rouge_l(extracted, gold)
+        else:
+            s["_em"] = None
+            s["_rouge"] = None
+            s["_no_gold"] = True
+        if s.get("number_answer") not in (None, ""):
+            try:
+                s["_numeric"] = numeric_match(extracted, float(s["number_answer"]))
+            except (TypeError, ValueError):
+                pass
 
     use_judge = args.judge == "deepseek-v3"
     if use_judge:
