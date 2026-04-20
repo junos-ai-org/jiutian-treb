@@ -14,6 +14,84 @@ Narrative journal for the encoder-vs-decoder TReB experiment. Append newest entr
 
 ---
 
+## 2026-04-20 — T5Gemma 2 bug bisected + upstream issues filed + play harness
+**Status**: in-progress
+
+**What happened** (long day):
+
+1. **Discovered the first eval pods got guillotined by RunPod's $80 spend cap** at 21:40 UTC on 04-19, ~10h into a 25h+ run. `eval.py` was writing `predictions.jsonl` only at the end → all in-flight predictions lost. Zero artifacts recovered from that burn.
+
+2. **Shipped two code fixes** that together make the pipeline robust to sudden death AND silently-wrong prompts:
+   - **Incremental writes**: HF backend now appends each batch's predictions to `predictions.partial.jsonl` with `flush()` + `os.fsync()` every 5 batches. Subsequent diagnostic crashed at sample 96/100 — **95 predictions safely on disk**.
+   - **Token-budgeted prompt assembly** (`build_prompt_tcot` now takes `tokenizer`, `max_input_tokens`): encode head (instruction/title) and tail (question + format instruction) separately, budget the table with leftovers. Fixes a silent-correctness bug where right-truncation was dropping the question for 12% of TReB English samples (937/7789 exceed 2K tokens).
+
+3. **Bisected the T5Gemma 2 attention bug precisely.** Stratified 100-sample diagnostic (quartile buckets), then a 9-sample targeted diagnostic at 2.5K/3.5K/5K/.../25K tokens confirmed:
+   - Bug threshold at `batch=1` is **4094 tokens** (not 2K or 7K as my intermediate notes guessed).
+   - Fingerprint: `RuntimeError: size of tensor a (4097) must match b (N)` where `a` is CONSTANT at 4097 and `b` = input_length + 3. `4097 = 4 × sliding_window(1024) + 1` — smells like a pre-allocated 4-window mask buffer that can't resize past 4096.
+   - Deterministic: every sample ≥5015 tokens failed, every sample ≤3525 tokens passed, no success above any failure.
+   - `sdpa` hits same class of bug; `flash_attention_2` explicitly unsupported for `T5Gemma2ForConditionalGeneration`.
+
+4. **Filed two upstream issues** at huggingface/transformers (both cross-linked):
+   - [#45521](https://github.com/huggingface/transformers/issues/45521) — decoder self-attn fixed 4097 mask bug at batch=1
+   - [#45522](https://github.com/huggingface/transformers/issues/45522) — FA2 support request for T5Gemma2 (specifically the merged self+cross attention path; Gemma 3's FA2 handles the sliding-window pattern already)
+
+5. **Added `merge_adapter.py` auto-detection of base model** from `adapter_config.json:base_model_name_or_path`. Prevents a silent-corruption foot-gun where `PeftModel.from_pretrained(wrong_base, adapter)` attaches LoRA to the wrong base with no error, producing junk weights. Purged stale `-ul2` references from README + script.
+
+6. **Built autonomous pod monitor pattern** (`monitor_pod.sh`) + completion sentinel (`eval.py` writes `predictions.jsonl.done` JSON with sha+count after successful end-of-run). Monitor polls via SSH, SCP's on sentinel detection, verifies line count matches sentinel, terminates pod. Failure = no sentinel = pod stays alive for diagnosis. End-to-end proven: threshold diag launched → scp+verify+terminate in 5 seconds after completion.
+
+7. **Completed 100-sample stratified t5gemma_base run** with the new pipeline (batch=1, max_input=4000, max_new_tokens=1024, token-budgeted prompt). 100/100 predictions on disk at `results/t5gemma_base/predictions.jsonl`. Initial read of outputs: base T5Gemma 2 produces **empty outputs on many tasks** (Code_Generation, Mathematical_Reasoning, Table_Column_Naming) and **repetition-to-max-tokens on others** (Hallucination_Evaluation, Instruction_Following) — classic "base model without IT" behavior. Strong signal that SFT should deliver a big delta.
+
+8. **`play.py` REPL shipped** for interactive probing. Loads a config's model once, drops into a prompt loop with `/sample <id>`, `/list`, `/help` commands. Supports HF (+ optional PEFT merge) and vLLM backends.
+
+9. **Currently running in parallel:**
+   - Pod `4njlyekxzkrdlu` (base): idle after 100-sample eval, user interactively probing via `play.py`. No auto-terminate.
+   - Pod `1mz1x9evkpngqg` (sft, new): running same 100 samples with the FLAN-SFT adapter. Auto-terminate on `.done`.
+
+**Decisions**:
+- Bug-avoidance config now: `batch_size: 1`, `max_input_tokens: 4000`, `max_new_tokens: 1024`, token-budgeted prompt assembly (Q + format preserved on all samples). With this, 100% of TReB English fits cleanly.
+- `max_new_tokens: 2048 → 1024`: runaway-generation samples (model can output 10K chars on a binary-classification task) are better captured as `TRUNCATED` failure-mode than allowed to pretend-succeed at a looser budget.
+- Length-stratified smoke (4 quartile bins × 25) is the default — gives coverage across the length spectrum for diagnostic, whereas task-stratified is length-median-heavy.
+- Qwen 32K existing results stay as the "ceiling data point"; a matched 4K Qwen run (client-side truncation) is still on the plan for apples-to-apples architecture comparison.
+
+**Next**:
+- SFT eval completion (~06:02 UTC wake) → compare base vs sft on the same 100 row-aligned samples
+- After base+sft both landed: launch matched Qwen@4K (fast, ~10 min, ~$0.20 on A100)
+- Local scoring: `score.py --judge deepseek-v3 --wandb` per variant, land them as sibling runs in project `treb-encoder-vs-decoder-eval`
+- Analysis + writeup in `experiments/t5gemma_vs_qwen_treb/insights/findings.md`
+
+**Artifacts**:
+- Local predictions: `results/{qwen_7b_instruct,t5gemma_base_diag,t5gemma_base_threshold,t5gemma_base}/predictions.jsonl`
+- Upstream issues: huggingface/transformers#45521 (bug), #45522 (FA2 request)
+- Bug repro: `experiments/t5gemma_vs_qwen_treb/insights/transformers_bug_repro.py` (public, ~15-line minimal reproducer)
+- Code commits this session (chronological): `04271f9` (Fix #1 + Fix #2 + max_input 6K), `0caa03a` (learnings), `29745cc` (sentinel+monitor), `a51f7cb` (threshold diag), `9f97837` (repro update), `8e46fd4` (max_input 4K), `fa75105` (max_new 1024 + play.py), `533bcfa` (play.py UX fix)
+- Secrets in `~/.claude/.env`: RUNPOD_API_KEY, OPENROUTER_API_KEY, WANDB_API_KEY, HF_TOKEN
+- Monitor pattern now in `experiments/t5gemma_vs_qwen_treb/monitor_pod.sh` (reusable for any RunPod job)
+
+---
+
+## 2026-04-19 — Eval pods launched (qwen + t5gemma)
+**Status**: in-progress
+**What happened**: Launched 2 eval pods in US-KS-2 after CI images built (had to drop `flash-attn` from t5gemma requirements — `pip install` fails without `--no-build-isolation`).
+- **qwen pod** `a0ye6mnqyyymc6`: 1× NVIDIA H100 NVL, $3.07/hr, `achithanar/treb-eval-qwen:b13788f`
+- **t5gemma pod** `zi7iimdgdrj6ox`: 2× NVIDIA H100 NVL, $6.14/hr, `achithanar/treb-eval-t5gemma:b13788f`. Runs t5gemma_base on GPU 0 and t5gemma_sft on GPU 1 in parallel via `run_all.sh` + `CUDA_VISIBLE_DEVICES`.
+
+Both: no network volume (local disk), idle-after-eval (`AUTO_TERMINATE` not set), SSH exposed.
+Env persisted: `HF_TOKEN`, `OPENROUTER_API_KEY`, `WANDB_API_KEY`, `WANDB_PROJECT=treb-encoder-vs-decoder-eval`.
+
+**Decisions**:
+- Our own `eval.py` (not TReB's reference harness). Architecture comparison is valid because all variants go through the identical harness; absolute numbers won't match the paper.
+- 3 GPUs total (1 per variant), no data-parallel sharding. Simpler.
+- Scoring runs locally after scp (DeepSeek V3 judge via OpenRouter, wandb-logged).
+
+**Next**: Monitor smoke phase (~10 min per variant after model download). If smoke passes → full 3,895-sample runs in parallel. Total projected wall-clock ~90 min, pod spend ~$15, judge ~$5–10.
+
+**Artifacts**:
+- Docker Hub: `achithanar/treb-eval-{qwen,t5gemma}:b13788f`
+- Pods: `a0ye6mnqyyymc6`, `zi7iimdgdrj6ox`
+- Will end at `/workspace/results/<variant>/predictions.jsonl` on each pod
+
+---
+
 ## 2026-04-19 — DDP restart-loop bug + eval harness scaffolded
 **Status**: in-progress
 **What happened**:
