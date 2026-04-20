@@ -74,6 +74,24 @@ model.enable_input_require_grads()   # defensive, safe to always call
 Symptom if missing: loss plateaus at the pretraining baseline — nothing
 actually learns.
 
+### PEFT adapter merging does NOT shape-validate the base
+
+`PeftModel.from_pretrained(base, adapter)` happily attaches LoRA deltas
+onto a base with matching layer names, *even if it's the wrong base*. No
+error, no warning — you get an output model with junk weights that runs
+cleanly but evaluates terribly. Nobody knows why the numbers tanked.
+
+This isn't theoretical: our `models/t5gemma-2-4b-sft/README.md` had a
+`--base google/t5gemma-2-4b-4b-ul2` example, a model id that doesn't
+exist today (v2 dropped the `-ul2` suffix). Copy-paste would 404 — the
+*safe* failure. The dangerous failure is: if someone later publishes a
+real `-ul2` variant, that README silently merges our FLAN-SFT adapter
+(trained on `t5gemma-2-4b-4b`) onto a different base, producing junk.
+
+**Fix**: read `base_model_name_or_path` from `adapter_config.json` (PEFT
+writes this at training time, always correct) and use it as the default
+`--base`. See `merge_adapter.py:resolve_base`.
+
 ### LoRA task type
 
 Use `task_type=TaskType.SEQ_2_SEQ_LM` — NOT `CAUSAL_LM`. SFTTrainer from
@@ -238,6 +256,81 @@ else
   python train.py --config "$CONFIG"
 fi
 ```
+
+## T5Gemma 2 inference bug — empirical bug threshold
+
+Earlier entries in this file claimed T5Gemma 2 batched inference above
+~2K tokens crashes with a shape mismatch. **Refined empirically on
+2026-04-20**: the threshold depends on batching config.
+
+| Config | Bug threshold |
+|---|---|
+| batch>1 with padding variance | fails past ~2K input tokens |
+| batch=1 (no padding) eager | **fails past ~7K input tokens** |
+
+Measured in a stratified 100-sample run: 95/100 succeeded at batch=1,
+max_input=32K. The 5 failures were all samples with 7,227+ input tokens
+(all in heavy-table tasks: `Table_Column_Naming`, `Table_Distribution_Testing`).
+Error: `RuntimeError: size of tensor a (4097) must match b (N)` where N
+is the failing sample's approximate input length — i.e. the bug's "other
+value" tracks real input size.
+
+Practical implications for eval:
+- `max_input_tokens: 6000` at batch=1 runs **100% of TReB English samples**
+  cleanly (no sample exceeds 6000 after token-budgeted prompt assembly).
+- At 6K cap, 5% of samples have their *table* truncated (token-budgeted
+  assembly preserves question+format). Acceptable for architecture
+  comparison against Qwen @ 2K (where we also truncate tables).
+- Root cause still traces to sliding-window mask construction (see bug
+  repro in `experiments/t5gemma_vs_qwen_treb/insights/transformers_bug_repro.py`).
+
+## Right-truncation silently drops the question
+
+HF tokenizers default to `truncation_side="right"`. Our original
+`build_prompt_tcot` assembled `[instruction, title, table, question,
+format_instr]` — so any sample that tokenizes past `max_length` has the
+question AND the JSON-format instruction cut off. The model then
+generates an answer to a table with no question, and we score that.
+
+Measured: at `max_length=2048` on TReB English, **12% of samples (937/7789)
+exceeded the cap**. That's 1-in-8 T5Gemma predictions in the previous
+runs that were made without the model ever seeing the question — a real
+correctness bug masquerading as poor model performance.
+
+**Fix**: token-budgeted prompt assembly. Encode `head = instruction + title`
+and `tail = question + format_instr` separately, budget the table with
+the remaining tokens, concatenate. Guarantees Q + format survive.
+Implemented in `experiments/t5gemma_vs_qwen_treb/eval.py:build_prompt_tcot`.
+
+## Incremental prediction writes are non-negotiable
+
+eval.py wrote `predictions.jsonl` only at the end of the run. RunPod
+force-exited our pods at the $80 spend cap ~10 h into a 25h+ run — all
+in-memory predictions were lost, zero on disk.
+
+Fix that shipped: append each batch's predictions to
+`predictions.partial.jsonl` with `flush()` + `os.fsync()` every 5
+batches. Survives sudden death. At end, rewrite in original order as
+`predictions.jsonl`.
+
+Verified on the next diagnostic: eval crashed at sample 96/100, and we
+had **95 predictions safely on disk** for analysis. Loss: 1 sample
+that was mid-batch.
+
+## RunPod spend cap hits like a guillotine
+
+User-set `spendLimit` is a HARD cap. When spend approaches it, RunPod
+force-exits ALL running pods (state `EXITED`, not terminated — container
+disk preserved but no active compute). This happens without warning to
+the pod; they're SIGKILL'd.
+
+Combined with "predictions.jsonl written only at end" this cost us 10 h
+× $6.14 of compute with zero results. Mitigations, in order of ROI:
+
+1. Incremental writes (above) — most important
+2. Monitor `myself.clientBalance` via graphql before + during long runs
+3. Estimate worst-case cost before launching, reserve 2× headroom
+4. Raise spendLimit to match the budget + buffer (requires user approval)
 
 When scaling effective batch with DDP, **sqrt-scale the learning rate**
 from your 1-GPU baseline (`lr_new = lr_base × √(batch_new / batch_base)`)
