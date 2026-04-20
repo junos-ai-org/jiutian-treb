@@ -6,13 +6,12 @@
 \usepackage{booktabs}
 \usepackage{xcolor}
 \usepackage{hyperref}
-\usepackage{fancyvrb}
 \usepackage{parskip}
 
-\hypersetup{colorlinks=true, linkcolor=blue!50!black, urlcolor=blue!50!black, citecolor=blue!50!black}
+\hypersetup{colorlinks=true, linkcolor=blue!50!black, urlcolor=blue!50!black}
 
 \title{\vspace{-2em}\textbf{T5Gemma 2 vs.\ Qwen 2.5 on TReB: Interim Report}\\
-\vspace{0.3em}\large {\normalfont\itshape What we set out to measure, what we actually found}}
+\vspace{0.2em}\large{\normalfont\itshape What we learned}}
 \author{\small akumch @ DiffusionTableQA}
 \date{\small 2026-04-20}
 
@@ -20,138 +19,93 @@
 \maketitle
 \vspace{-2em}
 
-\section*{TL;DR}
+\section{What we learned}
 
-We set out to compare an encoder--decoder architecture (T5Gemma~2 4B-4B, SFT'd on 100K FLAN) against a decoder-only at matched parameter count (Qwen~2.5 7B Instruct) on the \href{https://huggingface.co/datasets/JT-LM/JIUTIAN-TReB}{TReB} table-reasoning benchmark. The architecture comparison is \textbf{not delivered in this report}. Three reasons:
-\vspace{-0.4em}
-\begin{enumerate}\setlength\itemsep{0.1em}
-  \item A transformers-v5 implementation bug in \texttt{T5Gemma2} caps practical inference at \textbf{4094 input tokens} at \texttt{batch\_size=1} (much less than the model's advertised 128K context). Filed as \href{https://github.com/huggingface/transformers/issues/45521}{huggingface/transformers\#45521}; also filed a feature request for FA2 support as \href{https://github.com/huggingface/transformers/issues/45522}{\#45522}.
-  \item Our FLAN-SFT'd adapter \textbf{catastrophically mode-collapsed}: on every probed input it emits a single scalar JSON (\texttt{\{"answer": 10\}}, \texttt{\{"answer": 100\}}, etc.) followed by a repetition loop to \texttt{max\_new\_tokens}. Not a prompt-template issue — happens on plain free-form \texttt{``Q: 2+2? A:''} too.
-  \item Base T5Gemma~2 (no SFT) produces \textbf{empty outputs} on most tasks --- expected, since Google only released the pretrained checkpoint.
-\end{enumerate}
+\textbf{Upstream bug caps T5Gemma 2 at 4K input tokens}, not 128K. At \texttt{batch\_size=1}, \texttt{eager} attention, inputs $>4094$ tokens raise \texttt{RuntimeError: size of tensor a (4097) must match tensor b (N)}. Constant $4097 = 4\times\text{sliding\_window}(1024)+1$; $N=\text{input\_length}+3$. \texttt{sdpa} same class; \texttt{flash\_attention\_2} explicitly unsupported. Filed \href{https://github.com/huggingface/transformers/issues/45521}{\#45521}; FA2 feature request filed \href{https://github.com/huggingface/transformers/issues/45522}{\#45522}.
 
-\vspace{-0.4em}
-Against that, \textbf{Qwen~2.5 7B Instruct ran the full 7{,}789-sample English split cleanly via vLLM} in $\sim$7 minutes; local metrics landed (EM 0.159, ROUGE-L 0.309, numeric-match 0.434). The infrastructure works; the T5Gemma side of the comparison is the bottleneck.
-
-\section{Setup}
-
-\textbf{Dataset.} \texttt{JT-LM/JIUTIAN-TReB} (7{,}789 English samples across 26 tasks). TCoT (textual chain-of-thought) mode only; PoT and ICoT deferred.
-
-\textbf{Variants.} \texttt{t5gemma\_base} (pretrained), \texttt{t5gemma\_sft} (our LoRA adapter at Hub commit \texttt{abae90a8}), \texttt{qwen\_7b\_instruct} (at native 32K context); a matched-4K Qwen run is planned.
-
-\textbf{Infrastructure.} Custom eval harness (\texttt{eval.py}) with backend dispatch (vLLM for Qwen, HF + optional PEFT merge for T5Gemma). DeepSeek V3 via OpenRouter for LLM-as-Judge (12-class failure-mode taxonomy). Pods on RunPod H100 NVL; auto-termination on completion via per-variant \texttt{.done} sentinels + a background monitor (\texttt{monitor\_pod.sh}).
-
-\textbf{Pipeline hardening (shipped during this session).}
-\vspace{-0.4em}
-\begin{itemize}\setlength\itemsep{0.1em}
-  \item \textbf{Incremental writes}: predictions \texttt{flush()}+\texttt{fsync()}'d to \texttt{predictions.partial.jsonl} every 5 batches. Saved 95/100 once after a crash; previously lost all in-flight work.
-  \item \textbf{Token-budgeted prompt assembly}: \texttt{build\_prompt\_tcot} encodes head (instruction/title) and tail (question + format instruction) separately, budgets table with remainder. Previously, right-truncation at a 2K cap silently dropped the question on 12\% of samples --- 1-in-8 T5Gemma predictions were literally not answering the question.
-  \item \textbf{Adapter-merge safety}: \texttt{merge\_adapter.py} now defaults \texttt{--base} from \texttt{adapter\_config.json:base\_model\_name\_or\_path} instead of a hand-typed model id. \texttt{PeftModel.from\_pretrained} doesn't shape-validate against the original base --- naming mismatches silently produce junk weights.
-\end{itemize}
-
-\section{Finding 1: transformers-v5 T5Gemma2 is capped at 4K, not 128K}
-
-Bisected with a targeted 9-sample diagnostic spanning 2.5K--25K tokens at \texttt{batch\_size=1}:
-
-\begin{center}
-\small
+\begin{center}\small
 \begin{tabular}{rcr}
 \toprule
 \textbf{input tokens} & \textbf{result} & \textbf{tensor~b dim} \\
 \midrule
-2{,}497 & OK   & --- \\
-3{,}525 & OK   & --- \\
+2{,}497, 3{,}525 & OK & --- \\
 5{,}015 & FAIL & 5{,}018 \\
 6{,}499 & FAIL & 6{,}502 \\
 7{,}493 & FAIL & 7{,}496 \\
 9{,}997 & FAIL & 10{,}000 \\
-14{,}967 & FAIL & 14{,}970 \\
-19{,}808 & FAIL & 19{,}811 \\
-25{,}135 & FAIL & 25{,}138 \\
+14{,}967, 19{,}808, 25{,}135 & FAIL & input + 3 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-Every failure raises \texttt{RuntimeError: size of tensor a (4097) must match tensor b (N) at non-singleton dimension 3}, where \texttt{tensor a (4097)} is constant across every failure, and \texttt{tensor b = input\_length + 3}. $4097 = 4 \times \text{sliding\_window}(1024) + 1$ — the signature of a pre-allocated 4-window mask buffer that is not being resized for longer inputs. Affects both \texttt{eager} and \texttt{sdpa} attention paths; \texttt{flash\_attention\_2} is explicitly unsupported for \texttt{T5Gemma2ForConditionalGeneration}. The effective context ceiling is 4{,}094 tokens --- vs.\ the 128K advertised on the \href{https://huggingface.co/google/t5gemma-2-4b-4b}{model card}. Filed upstream.
+\textbf{Base T5Gemma 2 never learned to stop.} On plain ``Q: 2+2? A:'' it outputs \texttt{4} (correct), then loops \texttt{Q: 2+2? A: 4} until \texttt{max\_new\_tokens}. EOS is not reliably emitted. On TCoT-format prompts it outputs nothing at all --- the instruction format is OOD for this pretrained checkpoint (Google didn't release an IT variant). This is a pretrained-model property, not something our SFT introduced.
 
-\section{Finding 2: our FLAN-SFT adapter mode-collapsed}
+\textbf{Our FLAN-SFT adapter traded content for format.} Training loss $3.22\!\to\!1.47$ over 782 steps on 100K FLAN samples --- real learning, but mediocre plateau (smoke-test overfit on 200 samples got to 0.32). At inference: always emits one $\{\text{``answer''}: N\}$ JSON then loops.
 
-Five probes on the merged SFT adapter (\texttt{abae90a8}), via an interactive REPL (\texttt{play.py}):
-
-\begin{center}
-\small
+\begin{center}\small
 \begin{tabular}{llll}
 \toprule
-\textbf{Prompt style} & \textbf{Task} & \textbf{Gold} & \textbf{Model output} \\
+\textbf{Prompt} & \textbf{Gold} & \textbf{Base output} & \textbf{SFT output} \\
 \midrule
-TCoT  & Code\_Generation        & Python function       & \texttt{\{"answer": 1\}\{"answer": 2\}\ldots\{"answer": 125\}} \\
-TCoT  & Robustness\_Evaluation  & \texttt{neutral}      & \texttt{\{"answer": 10\}} $\to$ loop reproducing the prompt \\
-TCoT  & Mathematical\_Reasoning & \$101                 & \texttt{\{"answer": 100\}} $\to$ loop reproducing the prompt \\
-Plain & ``Q: What is 2+2? A:'' & 4                     & \texttt{22 + 22 = 44} (repeated $\sim$100$\times$) \\
-Plain & word problem, no TCoT   & \$101                 & \texttt{\$1.15 and \$1.10} (repeated $\sim$100$\times$) \\
+Q: 2+2? A:                & 4           & \texttt{4} then Q/A loop          & \texttt{22+22=44} $\times$100 \\
+Math TCoT (Molly's cost)  & \$101       & empty (0 tokens)                  & \texttt{\{"answer": 100\}} + loop \\
+Robustness TCoT           & neutral     & empty / garbled                   & \texttt{\{"answer": 10\}} + loop \\
+Code\_Gen TCoT            & Python code & empty                             & \texttt{\{"answer": 1..125\}} \\
+Plain total-cost question & \$101       & ---                               & \texttt{\$1.15 and \$1.10} $\times$100 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-Training loss (from the run-1 \texttt{trainer\_state.json} on Hub) went $3.22 \to 1.47$ over 782 steps (batch~128, 100K~FLAN, 1~epoch). Not random — real learning happened — but plateaued higher than our 50-step smoke overfit on 200 samples (loss $0.32$). Combined with the inference behavior, the adapter has a specific failure pattern:
-\vspace{-0.4em}
-\begin{itemize}\setlength\itemsep{0.1em}
-  \item Learned the \emph{shape} of FLAN's dominant target (short scalar JSON answer).
-  \item Did not learn content: no multi-step reasoning, even on in-distribution arithmetic.
-  \item Did not learn to emit EOS: every output runs to \texttt{max\_new\_tokens}, looping on an output it has already produced. Suggests FLAN training targets were ingested without an EOS-termination signal.
-\end{itemize}
+So SFT gained: always commits to JSON envelope. SFT lost nothing structurally (EOS was already broken). What SFT never gained: content understanding on anything beyond single-scalar answers. Not mode-collapse in the ``weights are random'' sense --- the number $100$ for a \$101 problem shows task-weak correlation --- but mode-collapse in the ``learned shape, not semantics'' sense.
 
-\vspace{-0.4em}
-The \emph{numbers} the model picks carry weak task-linkage (\texttt{100} for a \$101 problem; \texttt{10} for a 3-way classification is random), so the forward pass isn't completely decoupled from input — it's the decoder loop that's collapsed.
+\textbf{Qwen 2.5 7B Instruct works end-to-end via vLLM.} 7{,}789 TReB English samples, full 32K context, $\sim$7 min wall-clock, $\sim$\$1 on 1$\times$~H100~NVL.
 
-\section{Finding 3: the pipeline works for Qwen --- and has upstream knobs to trust}
-
-Qwen~2.5 7B Instruct, full 7{,}789 samples via vLLM at native 32K context, \texttt{batch\_size=8} internal, \texttt{max\_new\_tokens=2048}. Wall-clock: $\sim$7~min on 1$\times$~H100~NVL; cost: $\sim$\$1.
-
-\begin{center}
-\small
+\begin{center}\small
 \begin{tabular}{lrrr}
 \toprule
-\textbf{Metric} & \textbf{Overall} & \textbf{Best task} & \textbf{Worst} \\
+\textbf{Metric (overall, 7{,}789)} & \textbf{Value} & \textbf{Best task} & \textbf{Worst task} \\
 \midrule
-Exact Match     & 0.159 & Table\_Fact\_Checking 0.914 & Instruction\_Following (ref-free) \\
-ROUGE-L         & 0.309 & Table\_Fact\_Checking 0.914 & Table\_Column\_Naming 0.028 \\
-Numeric Match   & 0.434 & --- & --- \\
+Exact Match       & 0.159 & Table\_Fact\_Checking 0.914 & Hallucination\_Eval 0.000 \\
+ROUGE-L           & 0.309 & Table\_Fact\_Checking 0.914 & Table\_Column\_Naming 0.028 \\
+Numeric Match     & 0.434 & --- & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-Raw local metrics undersell Qwen. Per spot-checks, Qwen emits multi-paragraph step-by-step reasoning but doesn't wrap the final answer in the requested \texttt{\{"answer": \ldots\}} envelope --- tasks with EM=0 and ROUGE=0.3-0.5 (Understanding, Title\_Naming, Summary) are format-not-capability failures. The \emph{judge's} structured failure-mode classification (\texttt{FORMAT}, \texttt{PARTIAL}, \texttt{CORRECT}) will disentangle this. Judge run deferred until SFT is replaced.
+Reading these requires care: spot-checks show Qwen produces multi-paragraph step-by-step reasoning but rarely wraps the final answer in \texttt{\{"answer": \ldots\}}. Tasks with EM=0 and ROUGE=0.3--0.5 (Understanding, Title\_Naming, Summary) are format-not-capability failures. The judge's 12-class failure-mode taxonomy will disentangle these; judge run deferred until the SFT is usable.
 
-\section{Where this goes next}
+\textbf{Pipeline hardening shipped during this session:}
+\begin{itemize}\setlength\itemsep{0pt}
+  \item Incremental \texttt{.partial.jsonl} writes with \texttt{fsync} every 5 batches --- saved 95/100 after a crash where previously we lost everything.
+  \item Token-budgeted prompt assembly (\texttt{build\_prompt\_tcot}): guarantees question + format-instruction survive. Previously right-truncation silently dropped the question on 12\% of samples ($\geq$2K tokens) --- 1-in-8 old predictions were answered without the model seeing the question.
+  \item \texttt{merge\_adapter.py} auto-infers base from \texttt{adapter\_config.json} (prevents \texttt{PeftModel.from\_pretrained} silent-corruption when the hand-typed base doesn't match training).
+  \item Sentinel (\texttt{predictions.jsonl.done}) + \texttt{monitor\_pod.sh}: on sentinel detection, scp~$\to$~verify line count matches sentinel~$\to$~\texttt{DELETE} pod. No sentinel = pod stays alive for diagnosis.
+\end{itemize}
 
-\textbf{T5Gemma side.} Our adapter needs to be redone. Likely improvements, in priority order:
-\vspace{-0.4em}
-\begin{enumerate}\setlength\itemsep{0.1em}
-  \item Audit FLAN tokenization: ensure training targets are wrapped with a proper EOS token. Suspect current training let the model lose its ability to stop.
-  \item Use a dataset with longer, multi-step targets (e.g.\ FLAN-CoT, StrategyQA, GSM8K reasoning traces) so the model is tuned to \emph{reason} rather than \emph{emit JSON}.
-  \item More epochs --- 1 epoch at this scale likely under-trained; eval loss 1.38 is higher than expected.
-  \item Longer input context in training (currently capped at 1024); won't be unlocked for inference until \#45521 is fixed upstream, but doesn't hurt to train for.
+\section{What's next}
+
+\textbf{T5Gemma needs a re-SFT} to be useful for this comparison. Priority fixes, in order:
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item \textbf{Fix EOS.} Audit FLAN tokenization --- append a proper EOS token to every training target. This is likely why both base and SFT loop. Highest leverage.
+  \item \textbf{Use reasoning data.} FLAN targets are mostly short scalar answers; model never learned to reason. Train on FLAN-CoT / StrategyQA / GSM8K with full reasoning traces, not just final answers.
+  \item \textbf{More epochs.} Eval loss $1.38$ at 782 steps is undertrained.
 \end{enumerate}
 
-\textbf{Comparison that IS deliverable today.} Even without a usable SFT, we can run \texttt{t5gemma\_base} vs.\ \texttt{qwen@4K} (matched context) on the 100 stratified samples already run. It won't answer ``does SFT close the gap?'', but it will answer ``does the architecture matter before either is instruction-tuned?'' --- a weaker but honest result.
+\textbf{Without waiting for a new SFT}, we can run Qwen@4K (client-side truncated) against T5Gemma base on the 100 stratified samples. Won't answer ``does SFT help encoder-decoders?'' but will answer ``does architecture matter pre-IT?'' --- honest, narrower result.
 
-\textbf{Upstream dependency.} Both transformers issues (\#45521, \#45522) need to land before T5Gemma~2's advertised capabilities are reachable via HF. Gemma family precedent (\#37219, \#35290, \#31931, \#41875, vllm\#14881) has been resolved on 1--6 week timelines historically.
+\textbf{Upstream dependency.} Both transformers issues need to land before T5Gemma 2's advertised 128K context is reachable via HF. Related Gemma-family issues historically resolved on 1--6~week timelines.
 
-\section*{Appendix: key commits \& pointers}
-
+\section*{Pointers}
 \small
 \begin{tabular}{ll}
-Project repo (public) & \url{https://github.com/junos-ai-org/jiutian-treb/tree/experiment-setup/experiments/t5gemma_vs_qwen_treb} \\
-Upstream bug & \url{https://github.com/huggingface/transformers/issues/45521} \\
-Upstream FA2 request & \url{https://github.com/huggingface/transformers/issues/45522} \\
-Minimal bug repro & \texttt{experiments/t5gemma\_vs\_qwen\_treb/insights/transformers\_bug\_repro.py} \\
-Eval driver & \texttt{experiments/t5gemma\_vs\_qwen\_treb/eval.py} \\
-Interactive REPL & \texttt{experiments/t5gemma\_vs\_qwen\_treb/play.py} \\
-Pod monitor & \texttt{experiments/t5gemma\_vs\_qwen\_treb/monitor\_pod.sh} \\
-Qwen results (7{,}789) & \texttt{results/qwen\_7b\_instruct/predictions.jsonl} (local, gitignored) \\
-T5Gemma base (100) & \texttt{results/t5gemma\_base/predictions.jsonl} \\
-Training log & \texttt{DiffusionTableQA/t5gemma-2-4b-flan-sft-ddp} Hub repo, commit \texttt{abae90a8} \\
+Project repo            & \url{https://github.com/junos-ai-org/jiutian-treb} (branch \texttt{experiment-setup}) \\
+Upstream bug            & \url{https://github.com/huggingface/transformers/issues/45521} \\
+Upstream FA2 request    & \url{https://github.com/huggingface/transformers/issues/45522} \\
+Bug repro (public)      & \texttt{insights/transformers\_bug\_repro.py} \\
+Eval driver / REPL      & \texttt{eval.py}, \texttt{play.py}, \texttt{monitor\_pod.sh} \\
+SFT adapter             & Hub \texttt{DiffusionTableQA/t5gemma-2-4b-flan-sft-ddp}, commit \texttt{abae90a8} \\
+Qwen predictions (7{,}789) & \texttt{results/qwen\_7b\_instruct/predictions.jsonl} \\
+T5Gemma base (100)      & \texttt{results/t5gemma\_base/predictions.jsonl} \\
 \end{tabular}
 
 \end{document}
