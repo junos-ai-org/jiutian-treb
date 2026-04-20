@@ -26,6 +26,7 @@ declare -A CONFIG_OF=(
   [qwen_2k]="configs/qwen_7b_instruct_2k.yaml"
   [t5gemma_base]="configs/t5gemma_base.yaml"
   [t5gemma_sft]="configs/t5gemma_sft.yaml"
+  [t5gemma_base_threshold]="configs/t5gemma_base_threshold.yaml"
 )
 
 VARIANTS="${VARIANTS:-qwen t5gemma_base t5gemma_sft}"

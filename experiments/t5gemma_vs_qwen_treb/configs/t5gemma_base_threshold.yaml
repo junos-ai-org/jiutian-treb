@@ -1,0 +1,41 @@
+# Targeted diagnostic: 9 specific samples at known token lengths, run one
+# at a time (batch=1) to characterize the T5Gemma 2 SWA bug threshold.
+#
+# Goal: determine whether the bug triggers deterministically above some
+# length, is stochastic, or has a stepwise pattern. 9 samples × ~30s each
+# = ~5 min generation + model load → ~$0.50 on H100 NVL.
+
+variant: t5gemma_base_threshold
+
+model:
+  backend: hf_seq2seq
+  name_or_path: google/t5gemma-2-4b-4b
+  revision: null
+  adapter: null
+  dtype: bfloat16
+  attn_implementation: eager
+  device_map: auto
+
+generation:
+  max_new_tokens: 512           # smaller — we just need enough to confirm gen works
+  do_sample: false
+  num_beams: 1
+  temperature: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT
+  # Specific sample IDs at token lengths roughly: 2500, 3500, 5000, 6500,
+  # 7500, 10000, 15000, 20000, 25000. Written by the picker script.
+  target_ids: configs/_threshold_ids.json
+  batch_size: 1
+  max_input_tokens: 32768       # deliberately high — we want samples to hit
+                                # the model at their native length so we can
+                                # observe at which length the bug triggers.
+  continue_on_error: true       # record per-sample errors instead of aborting;
+                                # later samples run even if early ones crash.
+
+output:
+  predictions_path: /workspace/results/t5gemma_base_threshold/predictions.jsonl
+  metrics_path: /workspace/results/t5gemma_base_threshold/metrics.json

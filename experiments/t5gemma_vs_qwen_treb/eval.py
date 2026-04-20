@@ -292,17 +292,33 @@ def run_hf_seq2seq(config: dict, samples: list[dict], use_peft: bool = False) ->
 
     sorted_outs: list[str] = [""] * len(samples)
     FLUSH_EVERY_N_BATCHES = 5
+    continue_on_error = config["eval"].get("continue_on_error", False)
+    err_marker_prefix = "[EVAL_ERROR] "
     with partial_out.open("a") as pf:
         for i in range(0, len(samples), batch_size):
             batch_texts = sorted_texts[i:i + batch_size]
             batch_samples = [samples[sort_idx[i + j]] for j in range(len(batch_texts))]
-            enc = tokenizer(
-                batch_texts, padding=True, truncation=True, max_length=max_input_tokens,
-                return_tensors="pt",
-            ).to(model.device)
-            with torch.no_grad():
-                gen = model.generate(**enc, **gen_kwargs)
-            decoded = tokenizer.batch_decode(gen, skip_special_tokens=True)
+            try:
+                enc = tokenizer(
+                    batch_texts, padding=True, truncation=True, max_length=max_input_tokens,
+                    return_tensors="pt",
+                ).to(model.device)
+                with torch.no_grad():
+                    gen = model.generate(**enc, **gen_kwargs)
+                decoded = tokenizer.batch_decode(gen, skip_special_tokens=True)
+            except Exception as e:
+                if not continue_on_error:
+                    raise
+                # Record the failure, move on. Useful for threshold diagnostics
+                # where later samples may succeed even after an earlier crash.
+                msg = f"{type(e).__name__}: {e}"
+                print(f"[eval]   batch {i // batch_size} FAILED ({len(batch_texts)} samples): {msg[:300]}", flush=True)
+                decoded = [f"{err_marker_prefix}{msg}"] * len(batch_texts)
+                try:
+                    import torch as _t
+                    _t.cuda.empty_cache()
+                except Exception:
+                    pass
             for j, d in enumerate(decoded):
                 sorted_outs[i + j] = d
                 rec = {**batch_samples[j], "prediction": d, "variant": config["variant"]}
@@ -334,9 +350,28 @@ def main() -> None:
     smoke_n = config["eval"].get("smoke_size", 100) if args.smoke else None
 
     print(f"[eval] variant={config['variant']} backend={config['model']['backend']} smoke={args.smoke}")
-    samples = load_treb(
-        config["eval"]["dataset"], config["eval"]["language"], smoke_n
-    )
+
+    # target_ids (optional): if set, use exactly these IDs — overrides
+    # smoke_size + stratification. Used for targeted diagnostics where we
+    # need specific samples (e.g. bug-threshold bisection).
+    target_ids = config["eval"].get("target_ids")
+    if isinstance(target_ids, str):
+        # support indirection: path to a JSON list of ids
+        target_ids = json.loads(Path(target_ids).read_text())
+    if target_ids:
+        print(f"[eval] target_ids mode: loading full dataset, filtering to {len(target_ids)} specific ids")
+        all_samples = load_treb(
+            config["eval"]["dataset"], config["eval"]["language"], smoke_n=None
+        )
+        by_id = {s["id"]: s for s in all_samples}
+        missing = [tid for tid in target_ids if tid not in by_id]
+        if missing:
+            raise ValueError(f"target_ids not found in dataset: {missing[:5]}{'...' if len(missing)>5 else ''}")
+        samples = [by_id[tid] for tid in target_ids]
+    else:
+        samples = load_treb(
+            config["eval"]["dataset"], config["eval"]["language"], smoke_n
+        )
     n_tasks = len({s["task"] for s in samples})
     print(f"[eval] loaded {len(samples)} samples across {n_tasks} tasks")
 
