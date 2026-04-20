@@ -42,8 +42,10 @@ context and hyperparameter rationale.
    (private, `hub_strategy=checkpoint`).
 5. **Merge + push merged model:**
    ```
+   # --base is inferred from the adapter's adapter_config.json
+   # (base_model_name_or_path field, written by PEFT at train time).
+   # Pass --base only if you explicitly want a different base.
    python merge_adapter.py \
-     --base google/t5gemma-2-4b-4b-ul2 \
      --adapter /workspace/checkpoints/t5gemma-2-4b-flan-sft \
      --out    /workspace/merged/t5gemma-2-4b-flan-sft-merged \
      --push-to DiffusionTableQA/t5gemma-2-4b-flan-sft-merged

@@ -100,27 +100,82 @@ def load_treb(
     return out[:smoke_n]
 
 
-MAX_TABLE_CHARS = 30000  # Conservative — some dense TReB tables tokenize at
-                         # nearly 1 token per char (wall-of-pipes markdown), so
-                         # 40K chars still produced >32K token prompts. 30K chars
-                         # gives a safe upper bound well inside Qwen's 32K window
-                         # (with 2048 reserved for generation).
+MAX_TABLE_CHARS = 30000  # Upstream cap on Table_markdown before prompt assembly.
+                         # Rarely triggers given token-budgeted assembly below.
+
+_FORMAT_INSTR = (
+    'Reason step by step. Then output ONLY a single JSON object on the last '
+    'line: {"answer": <value>}'
+)
 
 
-def build_prompt_tcot(sample: dict) -> str:
-    table_md = sample["table_markdown"]
+def build_prompt_tcot(sample: dict, tokenizer=None, max_input_tokens: int | None = None) -> str:
+    """Build the TCoT prompt.
+
+    When `tokenizer` + `max_input_tokens` are supplied, we budget tokens so
+    that the HEAD (instruction + title + question + format instruction) is
+    guaranteed present, and the TABLE takes whatever token budget remains.
+    This prevents right-truncation from silently removing the question —
+    measured 12% of TReB English samples would have lost the question at a
+    2K token cap, producing bogus (question-less) predictions.
+
+    When no tokenizer is given (e.g. load_treb's length-proxy sorting), we
+    fall back to the legacy char-capped table assembly — still correct for
+    samples that fit the cap, and the HF backend will re-call with
+    tokenizer-aware budgeting during batch generation.
+    """
+    table_md = sample.get("table_markdown") or ""
+    instruction = sample.get("instruction") or ""
+    title = sample.get("title") or ""
+    question = sample["question"]
+
+    # Char-side table cap (cheap pre-filter; token-budgeted truncation below
+    # handles the exact fit when a tokenizer is provided).
     if len(table_md) > MAX_TABLE_CHARS:
-        table_md = table_md[:MAX_TABLE_CHARS] + "\n... [table truncated for length] ..."
-    parts = [sample["instruction"]]
-    if sample["title"]:
-        parts.append(sample["title"])
-    if table_md:
-        parts.append(table_md)
-    parts.append(f"Question: {sample['question']}")
-    parts.append(
-        'Reason step by step. Then output ONLY a single JSON object on the last line: {"answer": <value>}'
-    )
-    return "\n\n".join(parts)
+        table_md = table_md[:MAX_TABLE_CHARS] + "\n... [table truncated: char cap] ..."
+
+    head_parts = [instruction]
+    if title:
+        head_parts.append(title)
+    head = "\n\n".join(head_parts)
+    tail = f"Question: {question}\n\n{_FORMAT_INSTR}"
+
+    if tokenizer is None or not max_input_tokens:
+        # Legacy path: concatenate. Fine for shorter samples; use with caution
+        # on long ones (relies on downstream truncation which can drop `tail`).
+        pieces = [p for p in (head, table_md, tail) if p]
+        return "\n\n".join(pieces)
+
+    # Token-budgeted assembly: guarantee head+tail survive, budget the table
+    # to fill whatever's left. Leave 16 tokens of slack for separators and
+    # any BOS/EOS the tokenizer adds during encode().
+    SAFETY_SLACK = 16
+    head_ids = tokenizer.encode(head, add_special_tokens=False) if head else []
+    tail_ids = tokenizer.encode(tail, add_special_tokens=False)
+    table_budget = max_input_tokens - len(head_ids) - len(tail_ids) - SAFETY_SLACK
+    if table_budget <= 0:
+        # Head + tail alone already exceed budget. Just return head+tail;
+        # tokenizer truncation will handle (still tail-preserving if truncation
+        # side is set appropriately).
+        return f"{head}\n\n{tail}" if head else tail
+
+    if not table_md:
+        return f"{head}\n\n{tail}" if head else tail
+
+    table_ids = tokenizer.encode(table_md, add_special_tokens=False)
+    if len(table_ids) > table_budget:
+        table_ids = table_ids[:table_budget]
+        table_text = tokenizer.decode(table_ids, skip_special_tokens=True)
+        table_text = table_text + "\n... [table truncated: token budget] ..."
+    else:
+        table_text = table_md
+
+    pieces = []
+    if head:
+        pieces.append(head)
+    pieces.append(table_text)
+    pieces.append(tail)
+    return "\n\n".join(pieces)
 
 
 # ---- Backends ------------------------------------------------------------
@@ -143,24 +198,27 @@ def run_vllm(config: dict, samples: list[dict]) -> list[str]:
         top_p=g.get("top_p", 1.0),
         max_tokens=g.get("max_new_tokens", 512),
     )
-    # Optionally cap prompt length (e.g., to match a context-limited variant
-    # like T5Gemma @ 2K). Done client-side via tokenize → slice → re-decode,
-    # because SamplingParams kwarg names vary across vLLM versions.
+    # Token-budgeted prompt assembly — guarantees question + format instruction
+    # survive even when the table is long. See build_prompt_tcot docstring.
     max_input = config["eval"].get("max_input_tokens")
     prompts = []
-    truncated_count = 0
     for s in samples:
-        msgs = [{"role": "user", "content": build_prompt_tcot(s)}]
+        # Leave ~chat_template overhead room when computing budget (approx 20 tokens).
+        budget = max(0, (max_input - 20)) if max_input else None
+        user_content = build_prompt_tcot(s, tokenizer=tokenizer, max_input_tokens=budget)
+        msgs = [{"role": "user", "content": user_content}]
         text = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
-        if max_input:
-            ids = tokenizer.encode(text, add_special_tokens=False)
-            if len(ids) > max_input:
-                ids = ids[:max_input]
-                text = tokenizer.decode(ids, skip_special_tokens=False)
-                truncated_count += 1
         prompts.append(text)
     if max_input:
-        print(f"[eval] prompt-truncated {truncated_count}/{len(samples)} at {max_input} tokens", flush=True)
+        lens = [len(tokenizer.encode(p, add_special_tokens=False)) for p in prompts[:min(500, len(prompts))]]
+        lens.sort()
+        over = sum(1 for l in lens if l > max_input)
+        print(
+            f"[eval] prompt-token stats (sample of {len(lens)}): "
+            f"p50={lens[len(lens)//2]} p95={lens[int(0.95*len(lens))]} "
+            f"max={lens[-1]} cap={max_input} >cap={over}",
+            flush=True,
+        )
     outs = llm.generate(prompts, sp)
     # vLLM returns outputs in same order as prompts
     return [o.outputs[0].text for o in outs]
@@ -201,16 +259,29 @@ def run_hf_seq2seq(config: dict, samples: list[dict], use_peft: bool = False) ->
         num_beams=g.get("num_beams", 1),
     )
 
-    # Length-sorted batching: tokenize all prompts up-front, sort by length
-    # ascending, process in batches of similar length, then unsort predictions
-    # to original order. Removes most of the padding waste that comes from
-    # TReB's wild length variance (200-char tables next to 80K-char tables).
-    texts_all = [build_prompt_tcot(s) for s in samples]
+    # Token-budgeted prompt assembly so head (instr/title) + tail (question +
+    # format instruction) always survive; table is budgeted with the leftover
+    # tokens. See build_prompt_tcot docstring.
+    texts_all = [
+        build_prompt_tcot(s, tokenizer=tokenizer, max_input_tokens=max_input_tokens)
+        for s in samples
+    ]
     lens = [len(tokenizer.encode(t, add_special_tokens=False)) for t in texts_all]
+
+    # Length-sorted batching: sort by length ascending so each batch has
+    # similar-length samples → minimal padding waste on high-variance data.
+    # Unsort predictions to original order at the end.
     sort_idx = sorted(range(len(samples)), key=lambda i: lens[i])
     sorted_texts = [texts_all[i] for i in sort_idx]
-    print(f"[eval] lengths: min={min(lens)}  max={max(lens)}  median={sorted(lens)[len(lens)//2]}  "
-          f"batch_size={batch_size}  max_input={max_input_tokens}", flush=True)
+    lens_sorted = sorted(lens)
+    over_cap = sum(1 for l in lens if l > max_input_tokens)
+    print(
+        f"[eval] prompt-token stats: min={lens_sorted[0]} "
+        f"p50={lens_sorted[len(lens)//2]} p95={lens_sorted[int(0.95*len(lens))]} "
+        f"max={lens_sorted[-1]} cap={max_input_tokens} >cap={over_cap}  "
+        f"batch_size={batch_size}",
+        flush=True,
+    )
 
     # Incremental writes: append each batch's predictions to a .partial.jsonl
     # immediately (fsync'd). Survives any OOM / pod termination / crash.
