@@ -130,22 +130,55 @@ def main():
         except (KeyboardInterrupt, EOFError):
             print("\n[play] bye")
             return
-        if not text.strip():
+        stripped = text.strip()
+        if not stripped:
             continue
-        if text.startswith("/sample "):
-            sid = text.split(None, 1)[1].strip()
+        # Command detection is strip-aware (paste-friendly).
+        if stripped.startswith("/sample"):
+            parts = stripped.split(None, 1)
+            if len(parts) < 2 or not parts[1].strip():
+                print("[play] usage: /sample <full_id_with_task_prefix>  (e.g. Table_Query|2646e8725e97437)")
+                continue
+            sid = parts[1].strip()
             samples = load_treb(config["eval"]["dataset"], config["eval"]["language"])
             by_id = {s["id"]: s for s in samples}
+            # Fuzzy: if exact id not found, try suffix match on the hash portion
             if sid not in by_id:
-                print(f"[play] sample {sid} not found")
-                continue
+                matches = [i for i in by_id if i.endswith("|" + sid) or i == sid or sid in i]
+                if len(matches) == 1:
+                    sid = matches[0]
+                    print(f"[play] matched: {sid}")
+                elif len(matches) > 1:
+                    print(f"[play] '{sid}' ambiguous — {len(matches)} matches, first few:")
+                    for m in matches[:5]:
+                        print(f"       {m}")
+                    continue
+                else:
+                    print(f"[play] sample {sid!r} not found. Use full id like 'Task_Name|hash'.")
+                    continue
             s = by_id[sid]
             prompt = build_prompt_tcot(s, tokenizer=tok, max_input_tokens=config["eval"].get("max_input_tokens"))
             print(f"--- prompt (truncated for display) ---\n{prompt[:600]}{'...' if len(prompt)>600 else ''}\n---")
             print(f"GOLD: {s.get('gold_answer', '')[:200]}")
             print(f"\n=== generating ===")
+        elif stripped.startswith("/list"):
+            samples = load_treb(config["eval"]["dataset"], config["eval"]["language"])
+            by_task: dict[str, list] = {}
+            for s in samples:
+                by_task.setdefault(s["task"], []).append(s["id"])
+            print(f"[play] {len(by_task)} tasks:")
+            for task, ids in sorted(by_task.items()):
+                print(f"  {task} ({len(ids)} samples)  e.g. {ids[0]}")
+            continue
+        elif stripped.startswith("/help"):
+            print("[play] commands:")
+            print("  /sample <id>   load a TReB sample (full id, or suffix match)")
+            print("  /list          list all tasks with one example id each")
+            print("  <free text>    raw prompt to the model")
+            print("  end input with /// on its own line")
+            continue
         else:
-            prompt = text
+            prompt = text  # preserve original formatting (newlines etc) for raw prompts
             print(f"\n=== generating ===")
         print(gen(prompt))
         print("=== end ===\n")
