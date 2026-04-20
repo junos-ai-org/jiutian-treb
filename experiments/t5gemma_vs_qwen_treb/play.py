@@ -174,8 +174,75 @@ def main():
             print("[play] commands:")
             print("  /sample <id>   load a TReB sample (full id, or suffix match)")
             print("  /list          list all tasks with one example id each")
+            print("  /debug [prompt] show tokenizer + EOS inspection; generate w/ raw-ids")
             print("  <free text>    raw prompt to the model")
             print("  end input with /// on its own line")
+            continue
+        elif stripped.startswith("/debug"):
+            parts = stripped.split(None, 1)
+            probe = parts[1] if len(parts) > 1 else "Q: What is 2+2? A:"
+            print(f"\n--- tokenizer special tokens ---")
+            try:
+                print(f"  eos_token: {getattr(tok, 'eos_token', '?')}  id: {getattr(tok, 'eos_token_id', '?')}")
+                print(f"  bos_token: {getattr(tok, 'bos_token', '?')}  id: {getattr(tok, 'bos_token_id', '?')}")
+                print(f"  pad_token: {getattr(tok, 'pad_token', '?')}  id: {getattr(tok, 'pad_token_id', '?')}")
+                print(f"  special_tokens_map: {getattr(tok, 'special_tokens_map', {})}")
+                added = getattr(tok, "added_tokens_decoder", {}) or {}
+                print(f"  added_tokens (first 15):")
+                for i, (tid, tok_obj) in enumerate(list(added.items())[:15]):
+                    print(f"    id={tid}  content={getattr(tok_obj, 'content', tok_obj)!r}  special={getattr(tok_obj, 'special', '?')}")
+            except Exception as e:
+                print(f"  err: {e}")
+
+            print(f"\n--- model.config stop-related ---")
+            try:
+                cfg = getattr(model, "config", None)
+                if cfg is not None:
+                    print(f"  eos_token_id: {cfg.eos_token_id}")
+                    gc = getattr(cfg, "generation_config", None)
+                    dec = getattr(cfg, "decoder_start_token_id", None)
+                    print(f"  decoder_start_token_id: {dec}")
+                    if hasattr(cfg, "get_text_config"):
+                        try:
+                            tc = cfg.get_text_config()
+                            print(f"  text_config.eos_token_id: {getattr(tc, 'eos_token_id', None)}")
+                        except Exception:
+                            pass
+                # GenerationConfig defaults
+                try:
+                    from transformers import GenerationConfig
+                    gc = GenerationConfig.from_model_config(cfg) if cfg else None
+                    if gc:
+                        print(f"  GenerationConfig.eos_token_id: {gc.eos_token_id}")
+                        print(f"  GenerationConfig.pad_token_id: {gc.pad_token_id}")
+                except Exception as e:
+                    print(f"  GenerationConfig probe err: {e}")
+            except Exception as e:
+                print(f"  err: {e}")
+
+            if config["model"]["backend"] == "vllm":
+                print("\n[debug] skipping generation-time EOS inspection for vllm backend")
+                continue
+            print(f"\n--- generating 100 tokens on probe: {probe!r} ---")
+            import torch
+            enc = tok(probe, return_tensors="pt", truncation=True, max_length=512).to(model.device)
+            with torch.no_grad():
+                out = model.generate(**enc, max_new_tokens=100, do_sample=False, num_beams=1, return_dict_in_generate=True, output_scores=False)
+            seqs = out.sequences if hasattr(out, "sequences") else out
+            raw_ids = seqs[0].tolist()
+            print(f"  raw output length: {len(raw_ids)}  (input was {enc['input_ids'].shape[-1]})")
+            eos_id = getattr(model.config, "eos_token_id", None)
+            if isinstance(eos_id, list):
+                eos_ids = set(eos_id)
+            else:
+                eos_ids = {eos_id}
+            eos_positions = [i for i, t in enumerate(raw_ids) if t in eos_ids]
+            print(f"  EOS ids {eos_ids} appear at positions: {eos_positions[:10]}{'...' if len(eos_positions)>10 else ''}  (count={len(eos_positions)})")
+            print(f"  last 10 token ids: {raw_ids[-10:]}")
+            print(f"  decoded (skip_special=False):")
+            print(f"    {tok.decode(raw_ids, skip_special_tokens=False)[-300:]!r}")
+            print(f"  decoded (skip_special=True, last 200 chars):")
+            print(f"    {tok.decode(raw_ids, skip_special_tokens=True)[-200:]!r}")
             continue
         else:
             prompt = text  # preserve original formatting (newlines etc) for raw prompts
