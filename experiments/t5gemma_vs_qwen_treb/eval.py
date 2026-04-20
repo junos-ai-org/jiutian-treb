@@ -358,6 +358,24 @@ def main() -> None:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     print(f"[eval] wrote {len(preds)} predictions to {out_path}")
 
+    # Explicit completion sentinel for the monitor to watch. Only written on
+    # successful end-of-run, AFTER predictions.jsonl is fully on disk.
+    # If eval crashes, no sentinel → monitor leaves pod alive for diagnosis.
+    import hashlib
+    from datetime import datetime, timezone
+    sha = hashlib.sha256(out_path.read_bytes()).hexdigest()
+    done_path = out_path.with_suffix(".jsonl.done")
+    done_data = {
+        "variant": config["variant"],
+        "n_predictions": len(preds),
+        "completed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "predictions_path": str(out_path),
+        "predictions_sha256": sha,
+        "predictions_bytes": out_path.stat().st_size,
+    }
+    done_path.write_text(json.dumps(done_data, indent=2))
+    print(f"[eval] sentinel written: {done_path}")
+
 
 if __name__ == "__main__":
     main()
