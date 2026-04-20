@@ -212,3 +212,9 @@ __marimo__/
 # Experiment raw outputs (predictions, large artifacts) — commit only the analysis under insights/
 experiments/*/results/
 
+
+# LaTeX build artifacts (keep the .pdf as the deliverable)
+experiments/*/insights/*.aux
+experiments/*/insights/*.log
+experiments/*/insights/*.out
+experiments/*/insights/*.toc
