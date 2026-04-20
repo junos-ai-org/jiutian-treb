@@ -23,7 +23,7 @@ eval:
   dataset: JT-LM/JIUTIAN-TReB
   language: English
   mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
-  smoke_size: 500             # stratified across 26 tasks; same IDs as t5gemma (Random(42))
+  smoke_size: 100             # 4 length quartiles x 25 = 100; diagnostic + cross-variant aligned
   # vLLM batches internally; we pass all prompts in one list.
 
 output:

@@ -29,8 +29,21 @@ def load_config(path: str) -> dict:
     return yaml.safe_load(Path(path).read_text())
 
 
-def load_treb(dataset_id: str, language: str, smoke_n: int | None = None) -> list[dict]:
-    """Download language-specific JSONs + return flat sample list."""
+def load_treb(
+    dataset_id: str,
+    language: str,
+    smoke_n: int | None = None,
+    stratify_by: str = "length",
+) -> list[dict]:
+    """Download language-specific JSONs + return flat sample list.
+
+    When `smoke_n` is set, stratify-sample down to that count. Strategies:
+      - "length" (default): 4 equal-width bins by prompt-char length → smoke_n/4 from each.
+        Use this when we care about *coverage across input size* (e.g. diagnosing
+        whether long inputs trigger implementation bugs).
+      - "task": ~smoke_n/num_tasks samples per task. Use when we care about
+        coverage across the 26 TReB subtasks equally.
+    """
     local = snapshot_download(
         repo_id=dataset_id,
         repo_type="dataset",
@@ -52,19 +65,39 @@ def load_treb(dataset_id: str, language: str, smoke_n: int | None = None) -> lis
                 "title": title[0] if isinstance(title, list) and title else str(title or ""),
                 "table_markdown": md[0] if isinstance(md, list) and md else str(md or ""),
             })
-    if smoke_n:
-        by_task: dict[str, list] = defaultdict(list)
-        for s in samples:
-            by_task[s["task"]].append(s)
-        rng = random.Random(42)
-        per_task = max(1, smoke_n // len(by_task))
+    if not smoke_n:
+        return samples
+
+    rng = random.Random(42)
+    if stratify_by == "length":
+        # char-count proxy for token-count. Sort + slice into 4 quartile bins;
+        # take smoke_n/4 from each bin → guaranteed coverage of short/med/long/xlong.
+        def _char_len(s: dict) -> int:
+            return (len(s.get("instruction", "")) + len(s.get("question", ""))
+                    + len(s.get("table_markdown", "")))
+        ordered = sorted(samples, key=_char_len)
+        n_bins = 4
+        per_bin = smoke_n // n_bins
         out: list[dict] = []
-        for items in by_task.values():
-            rng.shuffle(items)
-            out.extend(items[:per_task])
-        rng.shuffle(out)
+        for b in range(n_bins):
+            start = len(ordered) * b // n_bins
+            end = len(ordered) * (b + 1) // n_bins
+            bucket = list(ordered[start:end])
+            rng.shuffle(bucket)
+            out.extend(bucket[:per_bin])
+        rng.shuffle(out)  # final shuffle so length-sort during eval still orders correctly
         return out[:smoke_n]
-    return samples
+    # Fall back: task-stratified
+    by_task: dict[str, list] = defaultdict(list)
+    for s in samples:
+        by_task[s["task"]].append(s)
+    per_task = max(1, smoke_n // len(by_task))
+    out = []
+    for items in by_task.values():
+        rng.shuffle(items)
+        out.extend(items[:per_task])
+    rng.shuffle(out)
+    return out[:smoke_n]
 
 
 MAX_TABLE_CHARS = 30000  # Conservative — some dense TReB tables tokenize at

@@ -24,7 +24,7 @@ eval:
   dataset: JT-LM/JIUTIAN-TReB
   language: English
   mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
-  smoke_size: 500             # stratified across 26 tasks; ~19 samples/task
+  smoke_size: 100             # 4 length quartiles x 25 = 100; diagnostic + cross-variant aligned
   batch_size: 1               # batch>1 triggers T5Gemma2 SWA mask shape bug above 2K
   max_input_tokens: 32768     # matches Qwen's native context (batch=1 avoids the bug)
 
