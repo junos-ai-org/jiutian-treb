@@ -24,9 +24,9 @@ eval:
   dataset: JT-LM/JIUTIAN-TReB
   language: English
   mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
-  smoke_size: 100
-  batch_size: 8               # dropped from 16 to fit eager memory budget at max_input=8192
-  max_input_tokens: 2048      # T5Gemma 2 attention has shape bug above ~2K in transformers v5; tracked as implementation limit vs Qwens 32K
+  smoke_size: 500             # stratified across 26 tasks; ~19 samples/task
+  batch_size: 1               # batch>1 triggers T5Gemma2 SWA mask shape bug above 2K
+  max_input_tokens: 32768     # matches Qwen's native context (batch=1 avoids the bug)
 
 output:
   predictions_path: /workspace/results/t5gemma_sft/predictions.jsonl

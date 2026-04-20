@@ -179,20 +179,37 @@ def run_hf_seq2seq(config: dict, samples: list[dict], use_peft: bool = False) ->
     print(f"[eval] lengths: min={min(lens)}  max={max(lens)}  median={sorted(lens)[len(lens)//2]}  "
           f"batch_size={batch_size}  max_input={max_input_tokens}", flush=True)
 
+    # Incremental writes: append each batch's predictions to a .partial.jsonl
+    # immediately (fsync'd). Survives any OOM / pod termination / crash.
+    # At end we rewrite as the canonical predictions.jsonl in original order.
+    partial_out = Path(config["output"]["predictions_path"]).with_suffix(".partial.jsonl")
+    partial_out.parent.mkdir(parents=True, exist_ok=True)
+    partial_out.write_text("")  # truncate any prior run
+
     sorted_outs: list[str] = [""] * len(samples)
-    for i in range(0, len(samples), batch_size):
-        batch_texts = sorted_texts[i:i + batch_size]
-        enc = tokenizer(
-            batch_texts, padding=True, truncation=True, max_length=max_input_tokens,
-            return_tensors="pt",
-        ).to(model.device)
-        with torch.no_grad():
-            gen = model.generate(**enc, **gen_kwargs)
-        decoded = tokenizer.batch_decode(gen, skip_special_tokens=True)
-        for j, d in enumerate(decoded):
-            sorted_outs[i + j] = d
-        if (i // batch_size) % 10 == 0:
-            print(f"[eval]   progress {i + len(batch_texts)}/{len(samples)}", flush=True)
+    FLUSH_EVERY_N_BATCHES = 5
+    with partial_out.open("a") as pf:
+        for i in range(0, len(samples), batch_size):
+            batch_texts = sorted_texts[i:i + batch_size]
+            batch_samples = [samples[sort_idx[i + j]] for j in range(len(batch_texts))]
+            enc = tokenizer(
+                batch_texts, padding=True, truncation=True, max_length=max_input_tokens,
+                return_tensors="pt",
+            ).to(model.device)
+            with torch.no_grad():
+                gen = model.generate(**enc, **gen_kwargs)
+            decoded = tokenizer.batch_decode(gen, skip_special_tokens=True)
+            for j, d in enumerate(decoded):
+                sorted_outs[i + j] = d
+                rec = {**batch_samples[j], "prediction": d, "variant": config["variant"]}
+                pf.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            # Flush + fsync every N batches so partial survives sudden death.
+            if (i // batch_size) % FLUSH_EVERY_N_BATCHES == 0:
+                pf.flush()
+                import os
+                os.fsync(pf.fileno())
+            if (i // batch_size) % 10 == 0:
+                print(f"[eval]   progress {i + len(batch_texts)}/{len(samples)}", flush=True)
 
     # Unsort: place each sorted output back at its original index
     outs: list[str] = [""] * len(samples)
