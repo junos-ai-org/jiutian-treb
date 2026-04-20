@@ -16,7 +16,7 @@ model:
   tensor_parallel_size: 1
 
 generation:
-  max_new_tokens: 2048
+  max_new_tokens: 1024        # CoT + JSON; 1024 covers typical TCoT length, captures runaway gen as TRUNCATED
   temperature: 0.0
   top_p: 1.0
 
