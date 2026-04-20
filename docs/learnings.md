@@ -259,30 +259,32 @@ fi
 
 ## T5Gemma 2 inference bug — empirical bug threshold
 
-Earlier entries in this file claimed T5Gemma 2 batched inference above
-~2K tokens crashes with a shape mismatch. **Refined empirically on
-2026-04-20**: the threshold depends on batching config.
+Precisely bisected on 2026-04-20 via targeted 9-sample diagnostic spanning
+2.5K-25K input tokens at `batch=1`. Filed upstream as
+[huggingface/transformers#45521](https://github.com/huggingface/transformers/issues/45521).
 
-| Config | Bug threshold |
-|---|---|
-| batch>1 with padding variance | fails past ~2K input tokens |
-| batch=1 (no padding) eager | **fails past ~7K input tokens** |
+**Threshold: inputs > ~4094 tokens crash.** Deterministic, not stochastic —
+every sample >=5015 tokens failed in our test; every sample <=3525 passed.
 
-Measured in a stratified 100-sample run: 95/100 succeeded at batch=1,
-max_input=32K. The 5 failures were all samples with 7,227+ input tokens
-(all in heavy-table tasks: `Table_Column_Naming`, `Table_Distribution_Testing`).
-Error: `RuntimeError: size of tensor a (4097) must match b (N)` where N
-is the failing sample's approximate input length — i.e. the bug's "other
-value" tracks real input size.
+Error fingerprint: `RuntimeError: The size of tensor a (4097) must match b (N)`
+where:
+- **`tensor a (4097)` is constant** across every failure regardless of input length
+- **`tensor b` = input_length + 3** (three special tokens the tokenizer adds)
+- Suggests `4097 = 4 * sliding_window(1024) + 1 query token` — a pre-allocated
+  attention buffer that doesn't resize beyond 4 windows.
 
-Practical implications for eval:
-- `max_input_tokens: 6000` at batch=1 runs **100% of TReB English samples**
-  cleanly (no sample exceeds 6000 after token-budgeted prompt assembly).
-- At 6K cap, 5% of samples have their *table* truncated (token-budgeted
-  assembly preserves question+format). Acceptable for architecture
-  comparison against Qwen @ 2K (where we also truncate tables).
-- Root cause still traces to sliding-window mask construction (see bug
-  repro in `experiments/t5gemma_vs_qwen_treb/insights/transformers_bug_repro.py`).
+Workaround matrix:
+- `attn_implementation="sdpa"` → same class of shape mismatch
+- `attn_implementation="flash_attention_2"` → `ValueError` (T5Gemma2 doesn't
+  support it yet)
+- Only `max_input_tokens <= 4094` works. At 4094 with token-budgeted prompt
+  assembly (see `build_prompt_tcot`), 100% of TReB English samples run.
+- ~10% of TReB English samples need their table truncated to fit in 4K.
+
+**Earlier notes in this file claimed the threshold was 2K or 7K.** Both were
+overreach from insufficient data. The 4K bisection is the accurate answer.
+Config values involved: `sliding_window: 1024`, `_sliding_window_pattern: 6`,
+`max_position_embeddings: 131072` (advertised 128K, actual usable at batch=1 is 4K).
 
 ## Right-truncation silently drops the question
 

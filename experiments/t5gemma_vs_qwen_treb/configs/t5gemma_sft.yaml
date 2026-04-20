@@ -26,7 +26,7 @@ eval:
   mode: TCoT                  # scoped: TCoT only. PoT/ICoT are a follow-up experiment.
   smoke_size: 100             # 4 length quartiles x 25 = 100; diagnostic + cross-variant aligned
   batch_size: 1               # batch>1 triggers T5Gemma2 SWA mask shape bug above 2K
-  max_input_tokens: 6000      # empirical: batch=1 eager crashes at ~7K tokens. 6K leaves safety margin. Fix #1 preserves Q when table overflows.
+  max_input_tokens: 4000      # empirical bug threshold is 4094 tokens (see HF transformers#45521); 4000 gives margin
 
 output:
   predictions_path: /workspace/results/t5gemma_sft/predictions.jsonl
