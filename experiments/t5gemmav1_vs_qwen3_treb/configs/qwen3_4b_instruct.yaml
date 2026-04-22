@@ -1,0 +1,36 @@
+# Qwen3-4B-Instruct-2507 — Alibaba's 4B instruction-tuned decoder-only.
+# Served via vLLM for throughput. Native 32K context, well-IT'd by Qwen team.
+# Reads the SAME target_ids list as t5gemma_v1_2b2b_ul2_it so the comparison
+# is on a shared sample subset (filtered by T5Gemma tokenizer to fit its
+# 4K SWA-safety window).
+
+variant: qwen3_4b_instruct
+
+model:
+  backend: vllm
+  name_or_path: Qwen/Qwen3-4B-Instruct-2507
+  revision: null
+  adapter: null
+  dtype: bfloat16
+  # vLLM-specific
+  gpu_memory_utilization: 0.90
+  max_model_len: 32768             # Qwen3-4B native. TCoT prompts in the
+                                    # kept set are ≤4K T5Gemma tokens ≈ ≤6K
+                                    # Qwen tokens, well under the cap.
+  tensor_parallel_size: 1          # 4B fits trivially on 1× H100
+
+generation:
+  max_new_tokens: 1024             # same as T5Gemma side for comparability
+  temperature: 0.0                 # greedy
+  top_p: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT
+  target_ids: dataset/kept_ids.json
+  smoke_size: 100
+
+output:
+  predictions_path: /workspace/results/qwen3_4b_instruct/predictions.jsonl
+  metrics_path: /workspace/results/qwen3_4b_instruct/metrics.json

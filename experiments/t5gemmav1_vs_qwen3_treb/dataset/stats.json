@@ -1,0 +1,151 @@
+{
+  "tokenizer": "google/t5gemma-2b-2b-ul2-it",
+  "max_tokens_cap": 4000,
+  "counts": {
+    "total": 7789,
+    "kept": 7018,
+    "dropped": 771,
+    "kept_pct": 90.1
+  },
+  "prompt_tokens": {
+    "min": 35,
+    "p50": 247,
+    "p90": 3893,
+    "p95": 9816,
+    "p99": 19606,
+    "max": 28136,
+    "mean": 1508.8
+  },
+  "per_task_retention": {
+    "Code_Generation": {
+      "kept": 500,
+      "total": 500,
+      "retention_pct": 100.0
+    },
+    "Hallucination_Evaluation": {
+      "kept": 500,
+      "total": 500,
+      "retention_pct": 100.0
+    },
+    "Instruction_Following": {
+      "kept": 90,
+      "total": 90,
+      "retention_pct": 100.0
+    },
+    "Mathematical_Reasoning": {
+      "kept": 500,
+      "total": 500,
+      "retention_pct": 100.0
+    },
+    "Multi-step_Conditional_Calculation": {
+      "kept": 1,
+      "total": 17,
+      "retention_pct": 5.9
+    },
+    "Multi-step_Correlation_Analysis": {
+      "kept": 4,
+      "total": 49,
+      "retention_pct": 8.2
+    },
+    "Multi-step_Fact_Checking": {
+      "kept": 11,
+      "total": 61,
+      "retention_pct": 18.0
+    },
+    "Multi-step_Hypothesis_Testing": {
+      "kept": 6,
+      "total": 61,
+      "retention_pct": 9.8
+    },
+    "Multi-step_Operations": {
+      "kept": 7,
+      "total": 61,
+      "retention_pct": 11.5
+    },
+    "Multi-step_Retrieval": {
+      "kept": 6,
+      "total": 48,
+      "retention_pct": 12.5
+    },
+    "Robustness_Evaluation": {
+      "kept": 500,
+      "total": 500,
+      "retention_pct": 100.0
+    },
+    "Table_Column_Naming": {
+      "kept": 214,
+      "total": 500,
+      "retention_pct": 42.8
+    },
+    "Table_Correlation_Analysis": {
+      "kept": 63,
+      "total": 63,
+      "retention_pct": 100.0
+    },
+    "Table_Distribution_Testing": {
+      "kept": 312,
+      "total": 500,
+      "retention_pct": 62.4
+    },
+    "Table_Domain-specific_Operations": {
+      "kept": 239,
+      "total": 239,
+      "retention_pct": 100.0
+    },
+    "Table_Fact_Checking": {
+      "kept": 500,
+      "total": 500,
+      "retention_pct": 100.0
+    },
+    "Table_General_Operations": {
+      "kept": 470,
+      "total": 500,
+      "retention_pct": 94.0
+    },
+    "Table_Hypothesis_Testing": {
+      "kept": 42,
+      "total": 42,
+      "retention_pct": 100.0
+    },
+    "Table_Outlier_Detection": {
+      "kept": 43,
+      "total": 43,
+      "retention_pct": 100.0
+    },
+    "Table_Plausibility_Verification": {
+      "kept": 15,
+      "total": 15,
+      "retention_pct": 100.0
+    },
+    "Table_Query": {
+      "kept": 497,
+      "total": 500,
+      "retention_pct": 99.4
+    },
+    "Table_Retrieval": {
+      "kept": 500,
+      "total": 500,
+      "retention_pct": 100.0
+    },
+    "Table_Selection": {
+      "kept": 498,
+      "total": 500,
+      "retention_pct": 99.6
+    },
+    "Table_Summary": {
+      "kept": 500,
+      "total": 500,
+      "retention_pct": 100.0
+    },
+    "Table_Title_Naming": {
+      "kept": 500,
+      "total": 500,
+      "retention_pct": 100.0
+    },
+    "Understanding": {
+      "kept": 500,
+      "total": 500,
+      "retention_pct": 100.0
+    }
+  }
+}

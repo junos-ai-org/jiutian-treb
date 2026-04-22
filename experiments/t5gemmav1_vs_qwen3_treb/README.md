@@ -1,0 +1,139 @@
+# T5Gemma v1 2B-2B UL2-IT vs Qwen3-4B on TReB
+
+**Status:** `phase 0 complete, scaffolded, no eval runs yet`
+
+## Hypothesis
+
+Does T5Gemma v1's **encoder-decoder architecture + UL2 pretraining + Google's
+full IT pipeline** (SFT + RLHF + model merging) carry any table-reasoning
+advantage over a similarly-sized, similarly-well-instruction-tuned
+decoder-only model (Qwen3-4B-Instruct-2507)?
+
+This is a cleaner read than the sibling `t5gemma_vs_qwen_treb`: both models
+are natively IT'd by their vendors, so there's no DIY-SFT confound.
+
+| Variant | Model | Params | Arch | Context | Instruction-tuning |
+|---|---|---|---|---|---|
+| `t5gemma_v1` | `google/t5gemma-2b-2b-ul2-it` | 5.6B | Enc-Dec | 8K in / 8K out | SFT + RLHF + merge |
+| `qwen3` | `Qwen/Qwen3-4B-Instruct-2507` | ~4B | Dec-only | 32K | Qwen's own IT recipe |
+
+Not strictly param-matched (5.6B vs 4B) — same "2025 small-instruct" regime.
+
+## Setup
+
+### Dataset
+
+TReB English, TCoT mode only. Same scoping as the sibling experiment (PoT and
+ICoT are follow-ups; bilingual evaluation is a separate axis).
+
+### Phase 0: bug-safe subset (pre-filter)
+
+Before running eval, `build_dataset.py` filters the 7,789 English TReB
+samples to those whose TCoT prompt fits under a 4,000-token cap when
+tokenized with the T5Gemma v1 tokenizer. Rationale:
+
+- T5Gemma 2 exhibits an SWA-mask-shape bug above 4094 tokens
+  ([HF transformers#45521](https://github.com/huggingface/transformers/issues/45521)).
+- T5Gemma v1's SWA window is 4096 (vs v2's 1024); the bug may or may not
+  transfer. Start conservatively at 4000; the pod-side verification in
+  task 3 of `docs/progress.md` will tell us if we can relax.
+- T5Gemma v1's context cap is 8K regardless — about half the dataset's
+  long tail exceeds that, so we're truncation-bound even without the SWA bug.
+
+**The same `kept_ids.json` is used by both variants** so the comparison is
+on an identical sample subset.
+
+```bash
+python build_dataset.py --max-tokens 4000
+```
+
+Produces `dataset/{kept_ids,dropped_ids,stats}.json`.
+
+#### Current retention
+
+| | count |
+|---|---|
+| total English samples | 7,789 |
+| **kept** (≤4K T5Gemma v1 tokens) | **7,018** (90.1%) |
+| dropped | 771 |
+
+**Tasks disproportionately affected** (<50% retention — cohort-wide
+8K-context weakness rather than experimental confound):
+
+| Task | Retention |
+|---|---|
+| Multi-step_Conditional_Calculation | 1/17 (5.9%) |
+| Multi-step_Correlation_Analysis | 4/49 (8.2%) |
+| Multi-step_Hypothesis_Testing | 6/61 (9.8%) |
+| Multi-step_Operations | 7/61 (11.5%) |
+| Multi-step_Retrieval | 6/48 (12.5%) |
+| Multi-step_Fact_Checking | 11/61 (18.0%) |
+| Table_Column_Naming | 214/500 (42.8%) |
+
+All other 19 tasks retain ≥62%, most at 100%. The Multi-step family's drop
+reflects T5Gemma v1's 8K context limit — flagged as a known limitation of
+this model, not a methodological issue.
+
+### Reasoning modes
+
+TCoT only. PoT/ICoT are follow-up experiments.
+
+### Metrics
+
+- **ROUGE-L** — text tasks
+- **Exact Match** (with numeric equivalence) — numeric tasks
+- **LLM-as-Judge** — DeepSeek V3 via OpenRouter (~$5 expected)
+
+### Infrastructure
+
+Two pods, same template as the sibling experiment:
+
+| Pod | Image | GPU | Variant | Est. wall-clock |
+|---|---|---|---|---|
+| t5gemma-v1 | *TBD — new or rebuild existing `treb-eval-t5gemma`* | 1× H100 | `t5gemma_v1` | 45–90 min (HF, batch=1) |
+| qwen3 | *TBD — new or rebuild existing `treb-eval-qwen` w/ vLLM ≥ 0.8* | 1× H100 | `qwen3` | 15–30 min (vLLM) |
+
+**Critical ordering**: T5Gemma v1 runs first. Qwen3 runs only after
+T5Gemma v1 produces a complete `predictions.jsonl.done` sentinel — no
+point spending GPU minutes on a baseline with nothing to compare to.
+
+### Pinning
+
+| Variant | Pin |
+|---|---|
+| T5Gemma v1 | `google/t5gemma-2b-2b-ul2-it` (latest main — pretrained reference) |
+| Qwen3 | `Qwen/Qwen3-4B-Instruct-2507` (explicit snapshot tag) |
+
+## How to run
+
+### Local scaffolding (phase 0)
+
+```bash
+cd experiments/t5gemmav1_vs_qwen3_treb
+python build_dataset.py --max-tokens 4000   # writes dataset/kept_ids.json
+```
+
+### On a pod
+
+```bash
+# smoke-then-full for the variant baked in via VARIANTS env (set per-image)
+bash run_all.sh
+
+# or override:
+VARIANTS=t5gemma_v1 bash run_all.sh           # just T5Gemma v1
+SKIP_FULL=1 VARIANTS=t5gemma_v1 bash run_all.sh  # just smoke
+RUN_ALL=0 CONFIG=configs/qwen3_4b_instruct.yaml SMOKE=1 bash run.sh
+```
+
+### SCP outputs off the pod
+
+Before killing a pod, pull predictions to local disk:
+
+```bash
+# from laptop, once pod is reachable
+scp -r root@<pod>:/workspace/results/ experiments/t5gemmav1_vs_qwen3_treb/results/
+```
+
+## TL;DR of findings
+
+*To be populated after runs complete. See `insights/` for analysis.*

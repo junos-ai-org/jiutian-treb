@@ -1,0 +1,42 @@
+# T5Gemma v1 2B-2B UL2-IT — Google-instruction-tuned encoder-decoder.
+# 5.6B params total, 8K context (both encoder and decoder), Gemma 2 base.
+# Post-trained with SFT + RLHF + model merging (per v1 tech report).
+
+variant: t5gemma_v1_2b2b_ul2_it
+
+model:
+  backend: hf_seq2seq
+  name_or_path: google/t5gemma-2b-2b-ul2-it
+  revision: null
+  adapter: null
+  dtype: bfloat16
+  attn_implementation: eager         # Match sibling v2 setup; SDPA has enc-dec
+                                      # shape-mismatch bug in transformers v5
+                                      # (we'll verify separately for v1).
+  device_map: auto
+
+generation:
+  max_new_tokens: 1024
+  do_sample: false                   # greedy
+  num_beams: 1
+  temperature: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT
+  # target_ids: filtered kept set from build_dataset.py. Both variants read
+  # the same list so the comparison is on a shared sample subset.
+  target_ids: dataset/kept_ids.json
+  smoke_size: 100                    # used only when --smoke is passed;
+                                      # stratified sample of target_ids.
+  batch_size: 1                      # conservative start — v2 had SWA mask
+                                      # shape bug that required batch=1.
+                                      # v1 may tolerate higher; verify on pod.
+  max_input_tokens: 4000             # matches dataset filter cap. We
+                                      # pre-filtered to samples that fit,
+                                      # so this is belt-and-suspenders.
+
+output:
+  predictions_path: /workspace/results/t5gemma_v1_2b2b_ul2_it/predictions.jsonl
+  metrics_path: /workspace/results/t5gemma_v1_2b2b_ul2_it/metrics.json
