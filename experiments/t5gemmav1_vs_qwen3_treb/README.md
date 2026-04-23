@@ -1,6 +1,24 @@
 # T5Gemma v1 2B-2B UL2-IT vs Qwen3-4B on TReB
 
-**Status:** `phase 0 complete, scaffolded, no eval runs yet`
+**Status:** `tiered plan — EOS fix verification in progress`
+
+### Scope (2026-04-22, after fast-fail verification)
+
+The first pod run revealed T5Gemma v1 UL2-IT's EOS-never-fires repetition
+pathology (see `insights/verification_smoke_2026-04-22.md`). Fix landed;
+re-scoping to a tiered rollout rather than a full 7018-sample run:
+
+1. **25-sample EOS-fix verification** on T5Gemma v1 — proves the chat
+   template + `<end_of_turn>` stop token fires correctly.
+2. **250-sample comparison set** on T5Gemma v1 (stratified from the 7018
+   filtered-kept IDs by prompt length).
+3. **250-sample comparison set** on Qwen3-4B on the *same* stratified
+   250 — apples-to-apples read.
+4. Score both + insights writeup.
+
+English only. TCoT only. 4K-token T5Gemma-tokenizer cap. No Chinese.
+Full 7018 de-scoped — 250 is plenty to see whether the models are in the
+same ballpark, and costs ~$0.50 vs ~$15.
 
 ## Hypothesis
 

@@ -144,3 +144,57 @@ Three fixes needed before the full T5Gemma v1 run is worth doing:
 Once those three ship → smoke again → if clean, launch full T5Gemma v1
 (~6 GPU-hours estimated post-fix, vs the 60-hour slog we'd have today) →
 only then launch Qwen3. Same-pod lifecycle handled by `monitor_pod.sh`.
+
+### 2026-04-23 — EOS fix verified + re-scoped run
+
+Per user direction, **full 7018 run de-scoped**. New tiered plan: 25-sample
+EOS-fix verification → 250-sample T5Gemma v1 → 250-sample Qwen3 (same
+stratified subset) → compare.
+
+Rationale: 250 stratified samples is enough to see whether the two models
+are in the same ballpark; 7018 would be ~15× the cost to buy little extra
+signal before we know scoring is calibrated.
+
+**EOS fix landed** (commit `d5554bd`): `run_hf_seq2seq` in `eval.py` now
+applies `tokenizer.apply_chat_template(...)` AND passes
+`eos_token_id=[1, 107]` (the regular `<eos>` + the `<end_of_turn>` marker
+that Gemma IT models actually use). Also drops `max_new_tokens` 1024→256.
+
+**Pod 2 `4q5g2hyy50vrq7` (EU-NL-1, H100 80GB)** — relaunched image, streamed
+new code, injected HF_TOKEN same as pod 1.
+
+**25-sample EOS-fix smoke (actually 24 after 4-bin stratification) —
+completed in ~3 min:**
+
+| Metric | Pre-fix (pod 1) | Post-fix (pod 2) |
+|---|---|---|
+| Avg prediction char length | ~4500 | **503** (↓ 10×) |
+| Wall-clock per sample (batch=1) | ~30 s | **~3 s** (↓ 10×) |
+| Valid-JSON extraction rate | 17/20 (85%) | 20/24 (83%) |
+| Repetition loop | yes, to `max_new_tokens` | **none** |
+| Exact-match hits | 1/20 (`Kevin` vs `(A)Kevin`) | 1/24 (`Entailment` exact) |
+
+Example post-fix output (Table_Title_Naming):
+```
+The table lists channels, their video aspect ratio, and the programming
+they broadcast.
+
+Therefore, a suitable title for the table would be: **"List of Channels
+and Their Programming"**.
+
+```json
+{"answer": "List of Channels and Their Programming"}
+```
+```
+
+Clean reasoning, single JSON block, model stopped on its own. This is
+what the scoring layer (ROUGE/numeric/LLM-judge) was designed for.
+
+**250-sample T5Gemma v1 run: in progress** on the same pod. p50 prompt
+length 237 tokens, max 3791 — well under the 4K filter cap. At ~3 s/sample
+× 248 samples ≈ 12 min wall-clock. Will SCP + terminate pod on sentinel.
+
+**Next**: launch Qwen3-4B pod (may need `pip install --upgrade vllm>=0.8`
+on pod; the baked image pins 0.6.3 which predates Qwen3 support). Same
+stratified 250 samples — the stratifier uses char-length and a fixed
+Random(42) seed, so both variants will see exactly the same subset.
