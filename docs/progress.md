@@ -176,10 +176,45 @@ Decoder-only is the per-param winner. Full per-task table in
 
 Both pods SCP'd + terminated. Total pod spend ~$2.
 
-### Open
+### Claude Sonnet LLM-judge via parallel subagents — 2026-04-23
 
-- LLM-as-judge pass (DeepSeek-V3 via OpenRouter, ~$1) for a more sensible
-  score than EM / ROUGE-L on text-generation tasks. Waiting on credits.
+Since neither ANTHROPIC_API_KEY nor OpenRouter credits were available for a
+programmatic judge, ran the 496-judgment pass via **20 parallel Claude Code
+subagents** (sonnet, ~25 samples each, 2 waves of 10). Uses Claude Code's
+compute pool — no external API key needed.
+
+**Judge results (mean score, 0-10):**
+
+| Variant | Mean | CORRECT % | CORRECT+PARTIAL % |
+|---|---:|---:|---:|
+| T5Gemma v1 (5.6B, enc-dec) | **4.10** | **32.3%** | 42.7% |
+| Gemma-2-2B-IT (2.6B, dec-only) | 3.81 | 30.2% | **43.1%** |
+
+**Architecture signal now visible in per-task breakdown:**
+
+- **T5Gemma wins the retrieval family** (+1.5–1.7 points): Table_Retrieval,
+  Table_Query, Table_Domain-specific_Operations. Cross-attention lets the
+  decoder re-attend to the encoded table at every step — the exact shape
+  of "find this specific thing" problems.
+- **Gemma-2 wins Robustness_Evaluation** (+1.76 points) — cleanly commits
+  to NLI labels (entailment / not_entailment / contradiction / neutral).
+- **T5Gemma TRUNCATED 17.7% vs Gemma-2 12.5%** — encoder-decoder produces
+  longer rationales, hits `max_new_tokens=256` mid-thought. Raising to 512
+  would likely recover ~5pp.
+- **Gemma-2 REFUSAL 4.4% vs T5Gemma 1.2%** — decoder-only says "I can't
+  access the table" more often. SFT/RLHF calibration artifact.
+
+**String metrics were severely undercounting both models.** EM said CORRECT
+rate was 10-11%; Sonnet judge says it's 30-32%. Most "EM misses" were
+semantic wins ("2.65" vs "Final Answer: 2.65", reasonable paraphrases of
+Table_Summary, etc.). Directional conclusion unchanged (tie on overall);
+absolute numbers much higher under a proper judge.
+
+Writeups: `experiments/t5gemmav1_vs_qwen3_treb/insights/judge_sonnet_2026-04-23.md`
+(primary), `…/comparison_2026-04-22.md` (string-metrics baseline).
+
+### Still open
+
 - Qwen3-8B retry when OpenRouter credits available (49/248 valid today).
 - Gemma-2-9B-IT as a param-equal decoder-only if we want a second data point.
 

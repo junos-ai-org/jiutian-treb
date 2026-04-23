@@ -166,9 +166,30 @@ retained for later (49/248 valid, blocked by OpenRouter credits).
 | T5Gemma v1 2B-2B UL2-IT | 5.6B | enc-dec | 0.105 | **0.244** |
 | Gemma-2-2B-IT | 2.6B | dec-only | **0.113** | 0.231 |
 
-**Tie.** Doubling params via encoder-decoder structure does not measurably
-move overall TReB/TCoT when you control for pretraining lineage. T5Gemma
-does lead on text-generation tasks (Summary, Title_Naming, Retrieval);
-Gemma-2 leads on closed-form classification (Fact_Checking, Understanding).
+**Tie on overall performance.** Doubling params via encoder-decoder
+structure does not measurably move overall TReB/TCoT when you control for
+pretraining lineage.
 
-Full per-task breakdown + caveats: [`insights/comparison_2026-04-22.md`](insights/comparison_2026-04-22.md).
+**Claude Sonnet LLM-judge pass** (via parallel subagents) on the same 248
+samples × 2 variants = 496 judgments:
+
+| Metric | T5Gemma v1 | Gemma-2-2B-IT |
+|---|---:|---:|
+| Mean score (0-10) | **4.10** | 3.81 |
+| CORRECT % | **32.3%** | 30.2% |
+| TRUNCATED % | 17.7% | 12.5% |
+| REFUSAL % | 1.2% | **4.4%** |
+
+**Architecture signal in per-task deltas (≥1 pt gap):**
+
+- T5Gemma wins the **retrieval family** — Table_Retrieval (+1.69),
+  Table_Query (+1.50), Table_Domain-specific_Operations (+1.67). Cross-
+  attention helps "find this specific thing in the table" problems.
+- Gemma-2 wins **Robustness_Evaluation** (+1.76) — decoder-only commits
+  to NLI labels more reliably.
+- T5Gemma **truncates ~40% more** (longer rationales hit `max_new_tokens=256`).
+- Gemma-2 **refuses ~4× more** ("I can't access that table" non-answers).
+
+Writeups: [`insights/judge_sonnet_2026-04-23.md`](insights/judge_sonnet_2026-04-23.md)
+(primary) · [`insights/comparison_2026-04-22.md`](insights/comparison_2026-04-22.md)
+(string-metrics baseline).
