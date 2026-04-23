@@ -224,6 +224,104 @@ def run_vllm(config: dict, samples: list[dict]) -> list[str]:
     return [o.outputs[0].text for o in outs]
 
 
+def run_hf_causal(config: dict, samples: list[dict]) -> list[str]:
+    """HF transformers backend for decoder-only models (Qwen3, Llama, etc.).
+
+    Used as a fallback when vLLM isn't available (e.g. image ships an older
+    vllm that doesn't know about Qwen3). Batched, left-padded, with chat
+    template applied via tokenizer.apply_chat_template.
+    """
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    m, g = config["model"], config["generation"]
+    dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
+    dtype = dtype_map[m.get("dtype", "bfloat16")]
+
+    tokenizer = AutoTokenizer.from_pretrained(m["name_or_path"], revision=m.get("revision") or None)
+    # Decoder-only generation needs left-padding so attention masks line up
+    # and positions of the generated tokens are correct.
+    tokenizer.padding_side = "left"
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        m["name_or_path"],
+        revision=m.get("revision") or None,
+        dtype=dtype,
+        device_map=m.get("device_map", "auto"),
+    )
+    model.eval()
+
+    batch_size = config["eval"].get("batch_size", 4)
+    max_input_tokens = config["eval"].get("max_input_tokens", 8192)
+    max_new_tokens = g.get("max_new_tokens", 256)
+
+    # Build chat-templated prompts
+    CHAT_OVERHEAD = 40
+    raw_prompts = [
+        build_prompt_tcot(s, tokenizer=tokenizer, max_input_tokens=max_input_tokens - CHAT_OVERHEAD)
+        for s in samples
+    ]
+    prompts = [
+        tokenizer.apply_chat_template(
+            [{"role": "user", "content": p}],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        for p in raw_prompts
+    ]
+    lens = [len(tokenizer.encode(p, add_special_tokens=False)) for p in prompts]
+    sort_idx = sorted(range(len(prompts)), key=lambda i: lens[i])
+    sorted_prompts = [prompts[i] for i in sort_idx]
+    lens_sorted = sorted(lens)
+    print(f"[eval] prompt-token stats: min={lens_sorted[0]} "
+          f"p50={lens_sorted[len(lens)//2]} p95={lens_sorted[int(0.95*len(lens))]} "
+          f"max={lens_sorted[-1]} batch_size={batch_size}", flush=True)
+
+    # Incremental writes so we survive crashes
+    partial_out = Path(config["output"]["predictions_path"]).with_suffix(".partial.jsonl")
+    partial_out.parent.mkdir(parents=True, exist_ok=True)
+    partial_out.write_text("")
+
+    sorted_outs: list[str] = [""] * len(samples)
+    with partial_out.open("a") as pf:
+        for i in range(0, len(samples), batch_size):
+            batch_prompts = sorted_prompts[i:i + batch_size]
+            batch_samples = [samples[sort_idx[i + j]] for j in range(len(batch_prompts))]
+            enc = tokenizer(
+                batch_prompts, padding=True, truncation=True, max_length=max_input_tokens,
+                return_tensors="pt",
+            ).to(model.device)
+            with torch.no_grad():
+                gen = model.generate(
+                    **enc,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    pad_token_id=tokenizer.pad_token_id,
+                )
+            # Strip the input prompt prefix from each generated sequence
+            input_lens = enc["attention_mask"].sum(dim=1).tolist()
+            decoded = []
+            for j, (seq, in_len) in enumerate(zip(gen, input_lens)):
+                new_tokens = seq[enc["input_ids"].shape[1]:]
+                decoded.append(tokenizer.decode(new_tokens, skip_special_tokens=True))
+            for j, d in enumerate(decoded):
+                sorted_outs[i + j] = d
+                rec = {**batch_samples[j], "prediction": d, "variant": config["variant"]}
+                pf.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            if (i // batch_size) % 5 == 0:
+                pf.flush()
+                import os; os.fsync(pf.fileno())
+            if (i // batch_size) % 5 == 0:
+                print(f"[eval]   progress {i + len(batch_prompts)}/{len(samples)}", flush=True)
+
+    outs: list[str] = [""] * len(samples)
+    for sort_pos, orig_idx in enumerate(sort_idx):
+        outs[orig_idx] = sorted_outs[sort_pos]
+    return outs
+
+
 def run_hf_seq2seq(config: dict, samples: list[dict], use_peft: bool = False) -> list[str]:
     import torch
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -440,6 +538,8 @@ def main() -> None:
         preds = run_hf_seq2seq(config, samples, use_peft=False)
     elif backend == "hf_seq2seq_peft":
         preds = run_hf_seq2seq(config, samples, use_peft=True)
+    elif backend == "hf_causal":
+        preds = run_hf_causal(config, samples)
     else:
         raise ValueError(f"unknown backend: {backend}")
 

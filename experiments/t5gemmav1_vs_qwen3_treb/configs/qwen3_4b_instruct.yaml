@@ -1,5 +1,9 @@
 # Qwen3-4B-Instruct-2507 — Alibaba's 4B instruction-tuned decoder-only.
-# Served via vLLM for throughput. Native 32K context, well-IT'd by Qwen team.
+# Served via HF transformers AutoModelForCausalLM (hf_causal backend).
+# Why not vLLM: the baked treb-eval-qwen image pins vllm<=0.7 which predates
+# Qwen3 support (Qwen3 needs >=0.8.5); the full qwen image is 12.7GB and was
+# slow to pull on RunPod at experiment time. hf_causal at batch=4 on an H100
+# finishes 250 samples in a few minutes — plenty fast for this comparison.
 # Reads the SAME target_ids list as t5gemma_v1_2b2b_ul2_it so the comparison
 # is on a shared sample subset (filtered by T5Gemma tokenizer to fit its
 # 4K SWA-safety window).
@@ -7,22 +11,17 @@
 variant: qwen3_4b_instruct
 
 model:
-  backend: vllm
+  backend: hf_causal
   name_or_path: Qwen/Qwen3-4B-Instruct-2507
   revision: null
   adapter: null
   dtype: bfloat16
-  # vLLM-specific
-  gpu_memory_utilization: 0.90
-  max_model_len: 32768             # Qwen3-4B native. TCoT prompts in the
-                                    # kept set are ≤4K T5Gemma tokens ≈ ≤6K
-                                    # Qwen tokens, well under the cap.
-  tensor_parallel_size: 1          # 4B fits trivially on 1× H100
+  device_map: auto
 
 generation:
   max_new_tokens: 256              # matches T5Gemma post-fix for comparability
-  temperature: 0.0                 # greedy
-  top_p: 1.0
+  do_sample: false                 # greedy
+  temperature: 1.0
 
 eval:
   dataset: JT-LM/JIUTIAN-TReB
@@ -31,6 +30,9 @@ eval:
   target_ids: dataset/kept_ids.json
   # Stratified 250 by default; override to 25 via sed when smoke-testing.
   smoke_size: 250
+  batch_size: 4                    # comfortable on H100 for a 4B model
+  max_input_tokens: 8192           # Qwen3 tokenizer; 4K T5Gemma tokens is
+                                    # roughly 5K Qwen tokens — 8K is ample.
 
 output:
   predictions_path: /workspace/results/qwen3_4b_instruct/predictions.jsonl
