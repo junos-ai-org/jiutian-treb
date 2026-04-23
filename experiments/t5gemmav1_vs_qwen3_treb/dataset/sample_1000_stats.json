@@ -1,0 +1,112 @@
+{
+  "seed": 42,
+  "n_requested": 1000,
+  "n_selected": 1000,
+  "min_per_task_floor": 20,
+  "per_task": {
+    "Code_Generation": {
+      "available": 500,
+      "sampled": 63
+    },
+    "Hallucination_Evaluation": {
+      "available": 500,
+      "sampled": 63
+    },
+    "Instruction_Following": {
+      "available": 90,
+      "sampled": 20
+    },
+    "Mathematical_Reasoning": {
+      "available": 500,
+      "sampled": 63
+    },
+    "Multi-step_Conditional_Calculation": {
+      "available": 1,
+      "sampled": 1
+    },
+    "Multi-step_Correlation_Analysis": {
+      "available": 4,
+      "sampled": 4
+    },
+    "Multi-step_Fact_Checking": {
+      "available": 11,
+      "sampled": 11
+    },
+    "Multi-step_Hypothesis_Testing": {
+      "available": 6,
+      "sampled": 6
+    },
+    "Multi-step_Operations": {
+      "available": 7,
+      "sampled": 7
+    },
+    "Multi-step_Retrieval": {
+      "available": 6,
+      "sampled": 6
+    },
+    "Robustness_Evaluation": {
+      "available": 500,
+      "sampled": 63
+    },
+    "Table_Column_Naming": {
+      "available": 214,
+      "sampled": 30
+    },
+    "Table_Correlation_Analysis": {
+      "available": 63,
+      "sampled": 20
+    },
+    "Table_Distribution_Testing": {
+      "available": 312,
+      "sampled": 44
+    },
+    "Table_Domain-specific_Operations": {
+      "available": 239,
+      "sampled": 34
+    },
+    "Table_Fact_Checking": {
+      "available": 500,
+      "sampled": 63
+    },
+    "Table_General_Operations": {
+      "available": 470,
+      "sampled": 63
+    },
+    "Table_Hypothesis_Testing": {
+      "available": 42,
+      "sampled": 20
+    },
+    "Table_Outlier_Detection": {
+      "available": 43,
+      "sampled": 20
+    },
+    "Table_Plausibility_Verification": {
+      "available": 15,
+      "sampled": 15
+    },
+    "Table_Query": {
+      "available": 497,
+      "sampled": 64
+    },
+    "Table_Retrieval": {
+      "available": 500,
+      "sampled": 64
+    },
+    "Table_Selection": {
+      "available": 498,
+      "sampled": 64
+    },
+    "Table_Summary": {
+      "available": 500,
+      "sampled": 64
+    },
+    "Table_Title_Naming": {
+      "available": 500,
+      "sampled": 64
+    },
+    "Understanding": {
+      "available": 500,
+      "sampled": 64
+    }
+  }
+}

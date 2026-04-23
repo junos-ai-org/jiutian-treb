@@ -23,6 +23,8 @@ mkdir -p /workspace/logs /workspace/results
 declare -A CONFIG_OF=(
   [t5gemma_v1]="configs/t5gemma_v1_2b2b_ul2_it.yaml"
   [qwen3]="configs/qwen3_4b_instruct.yaml"
+  [t5gemma_v1_1k]="configs/t5gemma_v1_1000.yaml"
+  [gemma2_2b_1k]="configs/gemma2_2b_1000.yaml"
 )
 
 VARIANTS="${VARIANTS:-t5gemma_v1}"

@@ -1,0 +1,32 @@
+# Gemma-2-2B-IT on the 1000-sample stratified subset (2026-04-23).
+# Same model + generation config as gemma2_2b_it.yaml; differs only in
+# target_ids (sample_1000.json) and output paths.
+
+variant: gemma2_2b_1k
+
+model:
+  backend: hf_causal
+  name_or_path: google/gemma-2-2b-it
+  revision: null
+  adapter: null
+  dtype: bfloat16
+  device_map: auto
+
+generation:
+  max_new_tokens: 256
+  do_sample: false
+  temperature: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT
+  target_ids: dataset/sample_1000.json
+  apply_chat_template: true
+  smoke_size: 25
+  batch_size: 4
+  max_input_tokens: 8192
+
+output:
+  predictions_path: /workspace/results/gemma2_2b_1k/predictions.jsonl
+  metrics_path: /workspace/results/gemma2_2b_1k/metrics.json

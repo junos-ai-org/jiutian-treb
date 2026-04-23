@@ -139,9 +139,15 @@ def _judge_prompt(s: dict) -> str:
     )
 
 
+JUDGE_MODEL_MAP = {
+    "deepseek-v3": "deepseek/deepseek-chat-v3",
+    "deepseek-v3.2": "deepseek/deepseek-v3.2",
+}
+
+
 def deepseek_judge(
     samples: list[dict],
-    model: str = "deepseek/deepseek-chat-v3",
+    model: str = "deepseek/deepseek-v3.2",
     max_workers: int = 8,
 ) -> dict[str, dict]:
     import httpx
@@ -341,7 +347,7 @@ def log_to_wandb(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--predictions", required=True)
-    parser.add_argument("--judge", choices=["none", "deepseek-v3"], default="none")
+    parser.add_argument("--judge", choices=["none", "deepseek-v3", "deepseek-v3.2"], default="none")
     parser.add_argument("--output", default=None)
     parser.add_argument("--judge-workers", type=int, default=8)
     parser.add_argument("--wandb", action="store_true",
@@ -379,10 +385,11 @@ def main() -> None:
             except (TypeError, ValueError):
                 pass
 
-    use_judge = args.judge == "deepseek-v3"
+    use_judge = args.judge in ("deepseek-v3", "deepseek-v3.2")
     if use_judge:
-        print(f"[score] running DeepSeek V3 judge on {len(samples)} samples via OpenRouter")
-        judgments = deepseek_judge(samples, max_workers=args.judge_workers)
+        judge_model = JUDGE_MODEL_MAP[args.judge]
+        print(f"[score] running {args.judge} judge ({judge_model}) on {len(samples)} samples via OpenRouter")
+        judgments = deepseek_judge(samples, model=judge_model, max_workers=args.judge_workers)
         for s in samples:
             j = judgments.get(s["id"], {})
             s["_judge_score"] = j.get("score", -1.0)
