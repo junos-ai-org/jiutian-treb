@@ -1,0 +1,324 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.85in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[table]{xcolor}
+\usepackage{hyperref}
+\usepackage{parskip}
+
+\hypersetup{colorlinks=true, linkcolor=blue!50!black, urlcolor=blue!50!black}
+
+\definecolor{hilite}{HTML}{FFEFC2}
+
+\title{\vspace{-2em}\textbf{T5Gemma v1 vs Gemma-2-2B-IT vs Qwen3-4B on TReB}\\
+\vspace{0.2em}\large{\normalfont\itshape Three-way comparison --- Claude Sonnet judge}}
+\author{\small akumch @ DiffusionTableQA}
+\date{\small 2026-04-23}
+
+\begin{document}
+\maketitle
+\vspace{-2em}
+
+\section*{TL;DR}
+
+\textbf{Pretraining quality swamps architecture at the 2--5B scale.} We ran two
+Gemma-2-lineage siblings --- encoder-decoder T5Gemma v1 vs pure decoder-only
+Gemma-2-2B-IT (same base weights, same SFT/RLHF recipe, only architecture
+differs) --- and a contemporaneous decoder-only from a different lineage
+(Qwen3-4B-Instruct-2507) on 248 stratified TReB English/TCoT samples.
+
+\begin{center}\small
+\begin{tabular}{lrlrrrr}
+\toprule
+\textbf{Variant} & \textbf{Params} & \textbf{Arch} & \textbf{Released} & \textbf{Mean} & \textbf{CORRECT\%} & \textbf{Sole wins} \\
+\midrule
+T5Gemma v1 2B-2B UL2-IT & 5.6\,B & enc-dec & Jun 2025 & 4.10 & 32.3\% & 15 \\
+Gemma-2-2B-IT           & 2.6\,B & dec-only & Jul 2024 & 3.81 & 30.2\% & 13 \\
+\rowcolor{hilite}
+\textbf{Qwen3-4B-Instruct-2507} & 4.0\,B & dec-only & Aug 2025 & \textbf{4.99} & \textbf{33.1\%} & \textbf{27} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{enumerate}
+  \item \textbf{Within the Gemma-2 lineage, encoder-decoder roughly ties decoder-only.}
+        T5Gemma edges Gemma-2-2B-IT by 0.29 on mean score and 2.1\,pp on CORRECT --- small.
+        The clean architectural bump shows up only on the retrieval family
+        (Table\_Query, Table\_Retrieval, Table\_Domain-Ops). Elsewhere enc-dec is a wash.
+  \item \textbf{Qwen3-4B beats both}, despite being 30\% smaller than T5Gemma and
+        from an entirely different pretraining culture. On 55 samples where exactly
+        one model got CORRECT, Qwen3 claims 27 (49\%), T5Gemma 15 (27\%), Gemma-2 13 (24\%).
+  \item \textbf{Qwen3's 45.6\% TRUNCATED rate} is a chain-of-thought-length artifact,
+        not reasoning failure. Against our 256-token cap, Qwen3's verbose reasoning
+        hits the ceiling almost half the time --- yet it still wins overall. Raising
+        to 1024 tokens would likely widen the lead further.
+  \item \textbf{47.6\% of samples are all-3-wrong} --- the 2--5B-class ceiling on TReB
+        at TCoT difficulty; architecture choice doesn't move it.
+\end{enumerate}
+
+\section{Release timeline \& lineage}
+
+\begin{center}\small
+\begin{tabular}{c c c c c}
+\toprule
+\textbf{Jul 2024} & $\longrightarrow$ & \textbf{Jun 2025} & & \textbf{Aug 2025} \\
+\midrule
+\rowcolor{blue!10}
+Gemma-2-2B-IT     & \scriptsize +encoder & T5Gemma v1          & & Qwen3-4B-Inst-2507 \\
+\rowcolor{blue!10}
+2.6\,B dec-only   & \scriptsize +UL2 adapt & 5.6\,B enc-dec     & & 4.0\,B dec-only \\
+\rowcolor{blue!10}
+(Google)          & \scriptsize +retrain & (Google, same SFT) & & (Alibaba) \\
+\bottomrule
+\multicolumn{3}{c}{\scriptsize\emph{same Gemma-2 pretraining base}} &
+\scriptsize\emph{\,\,different} &
+\scriptsize\emph{pretraining lineage} \\
+\end{tabular}
+\end{center}
+
+\textbf{T5Gemma v1 is not a from-scratch encoder-decoder.} Per the v1 tech
+report (arXiv:2504.06225), Google took the Gemma-2-2B pretrained
+decoder, duplicated \& re-initialized it as an encoder, and adapted the
+pair with UL2 denoising objectives, then ran their usual SFT + RLHF +
+model-merging IT pipeline. So the T5Gemma v1 vs Gemma-2-2B-IT pair is
+\emph{the same pretraining + the same post-training}, separated only by
+``bolt on an encoder and do the UL2 adapt.'' Qwen3-4B is a separate
+lineage entirely --- apples-vs-oranges on pretraining, but it's the
+contemporaneous dec-only of comparable size so it's the obvious sanity
+check.
+
+\section{Setup}
+
+\begin{itemize}
+  \item \textbf{Samples}: 248 stratified English/TCoT samples from TReB, pre-filtered
+        to prompts $\le$ 4000 T5Gemma tokens (SWA-bug gate). All three variants
+        evaluated on the same 248 sample ids.
+  \item \textbf{Judge}: Claude Sonnet 4.6 via parallel Claude Code subagents,
+        12-mode failure taxonomy (CORRECT, PARTIAL, FORMAT, HALLUCINATION,
+        WRONG\_SELECTION, NUMERIC, REASONING, REFUSAL, EMPTY, MISUNDERSTAND,
+        TRUNCATED, OTHER).
+  \item \textbf{Generation}: bf16, greedy, \verb|max_new_tokens=256| for all three.
+  \item \textbf{Backend}: T5Gemma via HF \verb|AutoModelForSeq2SeqLM|, Gemma-2
+        and Qwen3 via HF \verb|AutoModelForCausalLM|. No vLLM (contested-GPU issues).
+\end{itemize}
+
+\section{Per-TReB-category breakdown}
+
+Counts per TReB capability category with 3-way correctness patterns
+(T=T5Gemma CORRECT, G=Gemma-2 CORRECT, Q=Qwen3 CORRECT, dash = not-CORRECT):
+
+\begin{center}\small
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+\textbf{Category} & \textbf{n} & \textbf{all3} & \textbf{none} & \textbf{T-only} & \textbf{G-only} & \textbf{Q-only} & \textbf{TG} & \textbf{TQ} & \textbf{GQ} \\
+\midrule
+NLU                      & 98 & 19 & 39 & 5           & 7           & \textbf{10} & 6            & 6  & 6 \\
+Table Understanding      & 73 & 5  & 35 & \textbf{6}  & 5           & 3           & \textbf{12}  & 4  & 3 \\
+Table Basic Ops          & 35 & 3  & 18 & 1           & 0           & \textbf{9}  & 0            & 3  & 1 \\
+Table Computational Ops  & 23 & 5  & 11 & 2           & 0           & \textbf{4}  & 1            & 0  & 0 \\
+Data Analysis            & 18 & 0  & 15 & 1           & 1           & 1           & 0            & 0  & 0 \\
+Advanced Data Analysis   & 1  & 0  & 0  & 0           & 0           & 0           & ---          & ---& --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Table Understanding (73 samples)} is where the Gemma-2 lineage earns
+its keep. T5G sole wins 6 + T5G+G2-but-not-Qwen wins 12 = \textbf{18 of 73
+samples} where the Gemma family beats Qwen3. These are tasks where Qwen3's
+verbose reasoning gets truncated mid-thought.
+
+\textbf{Table Basic Ops (35 samples)} is Qwen3's domain: 9 sole wins to 1
+(T5G) and 0 (G2). When Qwen3 finishes, it does this family better.
+
+\textbf{NLU (98 samples)} is mixed --- Qwen3 edges ahead on sole wins (10
+vs 5/7) but totals are close.
+
+\textbf{Data Analysis (18 samples)} is 15/18 all-wrong --- nobody at this
+scale can compute a correlation coefficient or run a distribution test reliably.
+
+\subsection*{Per-category dominant failure modes}
+
+\begin{center}\footnotesize
+\begin{tabular}{l l l l}
+\toprule
+\textbf{Category (n)} & \textbf{T5Gemma v1} & \textbf{Gemma-2-2B-IT} & \textbf{Qwen3-4B} \\
+\midrule
+NLU (98)                     & CORRECT=36, WRONG\_S=27, TRUNC=18 & CORRECT=38, WRONG\_S=25, TRUNC=11 & \textbf{TRUNC=48}, CORRECT=41 \\
+Table Understanding (73)     & CORRECT=27, WRONG\_S=20, PARTIAL=18 & CORRECT=25, PARTIAL=16, WRONG\_S=15 & TRUNC=21, PARTIAL=20 \\
+Table Basic Ops (35)         & WRONG\_S=10, CORRECT=7, TRUNC=7 & WRONG\_S=13, NUMERIC=6, PARTIAL=4 & \textbf{CORRECT=16}, TRUNC=13 \\
+Table Computational Ops (23) & CORRECT=8, TRUNC=7, NUMERIC=5 & CORRECT=6, TRUNC=5, NUMERIC=5 & TRUNC=14, CORRECT=9 \\
+Data Analysis (18)           & TRUNC=8, WRONG\_S=3, REASON=2 & TRUNC=9, REFUSAL=3, EMPTY=3 & \textbf{TRUNC=16}, WRONG\_S=1 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Qwen3's modal failure in every category is TRUNCATED. T5Gemma's is
+WRONG\_SELECTION. Gemma-2's is WRONG\_SELECTION with a distinctive
+REFUSAL + EMPTY tail (says ``I can't access that table'' more than
+either sibling).
+
+\section{What this says about encoder-decoder architecture}
+
+Against the \emph{cleanest possible architectural comparator}
+(Gemma-2-2B-IT --- same pretraining base, same IT recipe), T5Gemma v1's
+encoder-decoder structure:
+
+\begin{itemize}
+  \item \textbf{Wins the retrieval family} (Table\_Retrieval +1.7,
+        Table\_Query +1.5, Table\_Domain-Ops +1.7 on mean score).
+        Mechanistically consistent with cross-attention: the decoder can
+        re-attend to the encoded table at every generation step.
+  \item \textbf{Ties or loses everywhere else.} Mean score +0.29, CORRECT\%
+        +2.1\,pp --- nothing to write home about when you're paying 2$\times$ the
+        parameters for it.
+\end{itemize}
+
+Against the \emph{newer, different-lineage comparator}
+(Qwen3-4B-Instruct-2507), the architectural edge is invisible. Qwen3
+beats both Gemma variants on mean score and CORRECT\%, and does so with
+30\% fewer params than T5Gemma. That tells us pretraining + post-training
+quality is more important than architecture at this parameter scale.
+
+\section{Recommended follow-ups}
+
+\begin{enumerate}
+  \item \textbf{Rerun Qwen3-4B at \texttt{max\_new\_tokens=1024}} --- would likely
+        convert a big chunk of its 113 TRUNCATED outcomes into CORRECT. Cheap ($\sim$\$0.50).
+  \item \textbf{Qwen3-14B} for same-lineage scaling comparison, to see if the
+        47.6\% all-wrong bucket is a 2--5B scale ceiling or a benchmark-difficulty floor.
+  \item \textbf{Gemma-2-9B-IT} as a param-equal Gemma-2 decoder-only (closer to
+        T5Gemma's 5.6B total params). Would sharpen the enc-dec-vs-dec-only
+        comparison within Gemma lineage.
+  \item \textbf{Relax the 4K-token filter} if T5Gemma v1's SWA bug doesn't
+        trigger above 4094 --- would recover the Multi-step\_* family that's
+        currently reduced to $n{=}1$.
+\end{enumerate}
+
+\section*{Cost}
+
+$\sim$\$4 of RunPod time across three pod runs + two aborted vLLM attempts.
+Sonnet judge pass: free (parallel Claude Code subagents). $\sim$12\,min of
+wall-clock judge time for 744 judgments.
+
+\clearpage
+\section*{Appendix --- 5 illustrative examples}
+
+\subsection*{(1) T5Gemma's encoder-decoder wins a retrieval task}
+
+\textbf{Task}: Table\_Title\_Naming \quad \textbf{id}: \texttt{feeb1c38...}
+
+\begin{center}\small
+\begin{tabular}{p{0.13\linewidth}p{0.80\linewidth}}
+\toprule
+\textbf{field} & \textbf{content} \\
+\midrule
+Q    & ``Please provide a title for the table based on its content.'' (table: 2014 ICC World Cricket League Division Four stats) \\
+Gold & \texttt{The title is 2014 ICC World Cricket League Division Four} \\
+\rowcolor{hilite}
+\textbf{T5Gemma} & \textbf{CORRECT (10)} --- \texttt{\{"answer": "2014 ICC World Cricket League Division Four"\}} --- exact match \\
+Gemma-2 & PARTIAL (8) --- \texttt{\{"answer": "...Division Four Information"\}} --- appended ``Information'' \\
+Qwen3 & PARTIAL (8) --- \texttt{\{"answer": "...Division Four: Event Details"\}} --- appended ``: Event Details'' \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+All three see the table content, but T5Gemma commits to the exact gold
+phrasing. Gemma-2 and Qwen3 both add descriptive suffixes --- a subtle
+behavior that costs 2 points.
+
+\subsection*{(2) Qwen3 wins a task needing semantic vocabulary}
+
+\textbf{Task}: Table\_Query \quad \textbf{id}: \texttt{0e92a63b...}
+
+\begin{center}\small
+\begin{tabular}{p{0.13\linewidth}p{0.80\linewidth}}
+\toprule
+\textbf{field} & \textbf{content} \\
+\midrule
+Q    & \texttt{which column is named "OT" in the table?} --- gold expects \emph{column index} \\
+Gold & \texttt{This column is the 2th one.} (number\_answer: 2) \\
+T5Gemma & PARTIAL --- \texttt{\{"answer": "OT"\}} --- answered the column \emph{name} not the index \\
+Gemma-2 & WRONG\_SELECTION --- same trap, answered \texttt{"OT"} \\
+\rowcolor{hilite}
+\textbf{Qwen3} & \textbf{CORRECT} --- \texttt{\{"answer": "second"\}} --- correctly reads ``which column'' as positional \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Both Gemmas parse the question the same (wrong) way; Qwen3's
+instruction-following catches that ``which column is named X'' means
+``give me the ordinal.''
+
+\subsection*{(3) Qwen3 truncation casualty --- had the answer, ran out of tokens}
+
+\textbf{Task}: Table\_Fact\_Checking \quad \textbf{id}: \texttt{1fb344ea...}
+
+\begin{center}\small
+\begin{tabular}{p{0.13\linewidth}p{0.80\linewidth}}
+\toprule
+\textbf{field} & \textbf{content} \\
+\midrule
+Q    & ``the model with 90\% after 1 year have 80\% after 3 year'' --- fact-check Entailment vs Contradiction \\
+Gold & \texttt{Entailment} \\
+T5Gemma & CORRECT --- identifies hr-3utgb meets criteria, outputs Entailment \\
+Gemma-2 & CORRECT --- same logic, Entailment \\
+\rowcolor{hilite}
+Qwen3 & \textbf{TRUNCATED} --- \emph{reasoning} identifies hr-3utgb at 90\%/80\%, supports Entailment, \textbf{but generation stops before emitting} \texttt{\{"answer": ...\}} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Qwen3 had the right answer but burned 256 tokens on reasoning. This is
+the 113/248-sample pattern that a larger \verb|max_new_tokens| would fix.
+
+\subsection*{(4) All 3 fail at the 2--5B ceiling}
+
+\textbf{Task}: Table\_Correlation\_Analysis \quad \textbf{id}: \texttt{5ec3400a...}
+
+\begin{center}\small
+\begin{tabular}{p{0.13\linewidth}p{0.80\linewidth}}
+\toprule
+\textbf{field} & \textbf{content} \\
+\midrule
+Q    & ``What is the correlation between the `number of branches' and `total assets' for a bank? Provide the correlation coefficient as evidence.'' \\
+Gold & \texttt{Strong positive correlation, 0.97} \\
+T5Gemma & FORMAT --- explains Pearson formula methodology, never computes the number \\
+Gemma-2 & TRUNCATED --- cuts off mid-formula \\
+Qwen3 & TRUNCATED --- lists variable names, starts Pearson formula, cuts off before computing \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+All three know the formula. None can actually execute the arithmetic
+over tabular data and emit the coefficient. Representative of the
+47.6\%-all-wrong bucket: the Data Analysis family is above what this
+parameter class can do.
+
+\subsection*{(5) Gemma-2-2B-IT wins a classification task}
+
+\textbf{Task}: Robustness\_Evaluation \quad \textbf{id}: \texttt{8f7d6ce7...}
+
+\begin{center}\small
+\begin{tabular}{p{0.13\linewidth}p{0.80\linewidth}}
+\toprule
+\textbf{field} & \textbf{content} \\
+\midrule
+Q    & NLI-style: (A) Dana Reeve widow of Christopher Reeve\ldots~vs (B) Dana Reeve\ldots~$\to$ entailment or not\_entailment \\
+Gold & \texttt{not\_entailment} \\
+T5Gemma & WRONG\_SELECTION --- returns \texttt{entailment} (wrong) \\
+\rowcolor{hilite}
+\textbf{Gemma-2} & \textbf{CORRECT} --- \texttt{not\_entailment} \\
+Qwen3 & TRUNCATED --- gets to ``Step 4: Check if (A) entails (B):'' and stops \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Gemma-2 is particularly strong on Robustness\_Evaluation (NLI labels)
+--- commits to a label efficiently. T5Gemma hedges toward entailment;
+Qwen3 over-reasons itself out of an answer. Gemma-2 wins 5/17 of these
+samples uniquely.
+
+\end{document}
