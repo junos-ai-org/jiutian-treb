@@ -158,30 +158,45 @@ def deepseek_judge(
         raise EnvironmentError("OPENROUTER_API_KEY not set; source ~/.claude/.env")
 
     def judge_one(s: dict) -> tuple[str, dict]:
+        import time as _time
         prompt = _judge_prompt(s)
-        with httpx.Client(
-            base_url="https://openrouter.ai/api/v1",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://github.com/junos-ai-org/jiutian-treb",
-                "X-Title": "treb-eval",
-            },
-            timeout=60.0,
-        ) as client:
-            r = client.post(
-                "/chat/completions",
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.0,
-                    "max_tokens": 250,
-                },
-            )
+        r = None
+        last_err = None
+        for attempt in range(4):
+            try:
+                with httpx.Client(
+                    base_url="https://openrouter.ai/api/v1",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "HTTP-Referer": "https://github.com/junos-ai-org/jiutian-treb",
+                        "X-Title": "treb-eval",
+                    },
+                    timeout=60.0,
+                ) as client:
+                    r = client.post(
+                        "/chat/completions",
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.0,
+                            "max_tokens": 250,
+                        },
+                    )
+                if r.status_code < 500:
+                    break
+                last_err = f"HTTP {r.status_code}"
+            except (httpx.RemoteProtocolError, httpx.ReadTimeout,
+                    httpx.ConnectTimeout, httpx.ConnectError,
+                    httpx.ReadError, httpx.WriteError) as e:
+                last_err = f"{type(e).__name__}: {e}"
+            _time.sleep(1.5 * (2 ** attempt))
         score = -1.0
         mode = "OTHER"
         rationale = ""
         raw = ""
         try:
+            if r is None:
+                raise RuntimeError(f"all retries failed: {last_err}")
             data = r.json()
             raw = data["choices"][0]["message"]["content"]
             # Be lenient — the judge might wrap JSON in prose or code fences.
@@ -217,7 +232,13 @@ def deepseek_judge(
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {ex.submit(judge_one, s): s["id"] for s in samples}
         for i, fut in enumerate(as_completed(futures)):
-            sid, j = fut.result()
+            sid = futures[fut]
+            try:
+                sid, j = fut.result()
+            except Exception as e:
+                j = {"score": -1.0, "mode": "OTHER",
+                     "rationale": f"judge crashed: {type(e).__name__}: {e}",
+                     "raw": ""}
             results[sid] = j
             if i % 50 == 0:
                 print(f"[judge] {i}/{len(samples)} done", flush=True)

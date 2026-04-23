@@ -1,0 +1,323 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.85in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[table]{xcolor}
+\usepackage{hyperref}
+\usepackage{parskip}
+
+\hypersetup{colorlinks=true, linkcolor=blue!50!black, urlcolor=blue!50!black}
+\definecolor{hilite}{HTML}{FFEFC2}
+
+\title{\vspace{-2em}\textbf{T5Gemma v1 2B-2B UL2-IT vs Gemma-2-2B-IT on TReB}\\
+\vspace{0.2em}\large{\normalfont\itshape Same-lineage architecture comparison --- 1000 samples --- DeepSeek-v3.2 judge}}
+\author{\small akumch @ DiffusionTableQA}
+\date{\small 2026-04-23}
+
+\newcommand{\hl}[1]{\colorbox{hilite}{\strut #1}}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\section*{TL;DR}
+
+On \textbf{1000 stratified TReB English samples}, T5Gemma v1 (encoder-decoder,
+5.6B) beats its same-lineage decoder-only counterpart Gemma-2-2B-IT (2.6B) on
+overall correctness (\textbf{35.6\,\% vs 30.7\,\%}), mean judge score
+(\textbf{4.47 vs 4.02}), and 16 of 26 tasks. The encoder-decoder's advantage is
+concentrated in \textbf{retrieval and fact-checking} (+12\,pp and +11\,pp),
+consistent with the earlier 250-sample read but now with 4$\times$ the
+statistical power and a reproducible, API-based judge.
+
+Encoder-decoder costs \textbf{2$\times$ the parameters} for +5\,pp CORRECT,
+and Gemma-2 still wins \textbf{Understanding by +15\,pp}, so architecture
+choice is a task-mix question rather than a blanket win. Both models are
+wrong on \textbf{55\,\%} of samples --- the 2--5B capacity ceiling reproduces.
+
+\section*{Setup}
+
+\begin{tabular}{@{}ll@{}}
+\toprule
+Dataset & TReB English, phase-0 filtered ($\leq$\,4K tokens), stratified 1000 (seed=42) \\
+Model A & \texttt{google/t5gemma-2b-2b-ul2-it} --- enc-dec, 5.6B, 2026 (T5Gemma v1) \\
+Model B & \texttt{google/gemma-2-2b-it} --- dec-only, 2.6B, 2024 (Gemma-2 lineage) \\
+Mode & TCoT --- text chain-of-thought, \texttt{\{"answer": X\}} JSON \\
+Generation & greedy, max\_new\_tokens=256, chat template, \texttt{eos\_token\_id=[1,\,107]} \\
+Judge & DeepSeek v3.2 via OpenRouter, 12-mode taxonomy, score 0--10 \\
+Hardware & 1$\times$ H100 80GB HBM3, EU-NL-1 \\
+Wall-clock & T5G $\sim$80\,min @ bs=1, G2 $\sim$15\,min @ bs=4, judge $\sim$18\,min @ 12 workers \\
+\bottomrule
+\end{tabular}
+
+\medskip
+
+Both models share the same Gemma-2 pretraining base and the same
+Google-published SFT + RLHF recipe. T5Gemma v1 is described in its tech
+report as ``an encoder-decoder adapted from Gemma-2 via UL2 + SFT,'' so
+\textbf{architecture is the only dimension that moves} between them.
+
+\section*{Headline}
+
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Metric & T5Gemma v1 & Gemma-2-2B-IT & $\Delta$ \\
+\midrule
+n & 1000 & 1000 & --- \\
+\textbf{CORRECT \%} & \hl{35.6\,\%} & 30.7\,\% & \textbf{+4.9\,pp} \\
+CORRECT + PARTIAL \% & 50.0\,\% & 44.8\,\% & +5.2\,pp \\
+\textbf{Mean judge score (0--10)} & \hl{4.47} & 4.02 & \textbf{+0.45} \\
+EM & 0.117 & 0.092 & +0.025 \\
+ROUGE-L & 0.272 & 0.228 & +0.044 \\
+Numeric-match & 0.289 & 0.252 & +0.037 \\
+\bottomrule
+\end{tabular}
+
+\medskip
+
+Same direction as the 250-sample read, with tighter error bars. At
+$n=1000$ this is past chance noise --- the 2-way bucket table below makes
+the sign concrete.
+
+\section*{2-way correctness buckets}
+
+Each sample classified by whether each model was judged CORRECT:
+
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Bucket & Count & Share \\
+\midrule
+\textbf{TG} --- both CORRECT & 214 & 21.4\,\% \\
+\textbf{T-} --- only T5Gemma CORRECT & \hl{142} & 14.2\,\% \\
+\textbf{-G} --- only Gemma-2 CORRECT & 93 & 9.3\,\% \\
+\textbf{-{}-} --- both wrong & 551 & 55.1\,\% \\
+\bottomrule
+\end{tabular}
+
+\medskip
+
+T5Gemma wins on net by \textbf{49 samples} (14.2 $-$ 9.3 = 4.9\,pp),
+matching the CORRECT delta in the headline. \textbf{55\,\% of samples are
+wrong for both} --- the 2--5B capacity ceiling reproduces at 4$\times$ the
+sample size.
+
+\section*{Failure-mode distribution}
+
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+Mode & T5Gemma v1 & Gemma-2-2B & \\
+\midrule
+CORRECT & \hl{35.6\,\%} & 30.7\,\% & T5G +4.9\,pp \\
+WRONG\_SELECTION & 35.8\,\% & 39.0\,\% & dominant failure for both \\
+PARTIAL & 14.4\,\% & 14.1\,\% & tie \\
+NUMERIC & 3.9\,\% & 3.0\,\% & \\
+HALLUCINATION & 3.4\,\% & 3.8\,\% & \\
+TRUNCATED & 1.9\,\% & 2.2\,\% & much lower than 250-run's 17.7\,\% \\
+REASONING & 1.7\,\% & 1.1\,\% & \\
+OTHER & 1.2\,\% & 0.7\,\% & \\
+REFUSAL & 1.0\,\% & \hl{3.7\,\%} & G2 refuses $\sim$4$\times$ more \\
+FORMAT & 0.7\,\% & 0.7\,\% & tie \\
+MISUNDERSTAND & 0.3\,\% & 0.3\,\% & tie \\
+EMPTY & 0.1\,\% & 0.7\,\% & G2 has 7 silent no-ops \\
+\bottomrule
+\end{tabular}
+
+\medskip
+
+\textbf{Two modes track architecture:}
+\begin{itemize}
+  \item \textbf{Gemma-2 refuses $\sim$4$\times$ more} (3.7 vs 1.0\,\%) ---
+        same signal as the 250-run. Same SFT pipeline, so almost certainly
+        a decoder-only vs encoder-decoder calibration difference.
+  \item \textbf{T5Gemma TRUNCATED fell to 1.9\,\%} (from 17.7\,\% at 250).
+        The 250-set over-indexed on long-output Table\_Summary / retrieval;
+        stratified 1000 doesn't. T5Gemma is \emph{not} a structurally long
+        generator --- max\_new\_tokens=256 is enough.
+\end{itemize}
+
+\section*{Per-category performance}
+
+Tasks grouped into 7 semantic categories:
+
+\begin{tabular}{@{}lrrrrrrrc@{}}
+\toprule
+Category & $n$ & T5G \% & G2 \% & T only & G only & both OK & both wrong & Winner \\
+\midrule
+retrieval      & 192 & \hl{41.1} & 29.2 & 39 & 16 & 40 & 97 & \textbf{T5G} \\
+fact\_checking & 204 & \hl{52.9} & 42.2 & 48 & 26 & 60 & 70 & \textbf{T5G} \\
+computation    & 223 & \hl{32.3} & 28.7 & 26 & 18 & 46 & 133 & T5G \\
+understanding  &  84 & 45.2 & \hl{60.7} &  6 & 19 & 32 & 27 & \textbf{G2} \\
+summarization  & 158 & \hl{32.9} & 27.8 & 18 & 10 & 34 & 96 & T5G \\
+analysis       & 104 &  2.9 &  2.9 &  3 &  3 &  0 & 98 & tie (floor) \\
+multi\_step    &  35 & 11.4 &  8.6 &  2 &  1 &  2 & 30 & T5G (small $n$) \\
+\bottomrule
+\end{tabular}
+
+\medskip
+
+\textbf{Reads:}
+
+\begin{itemize}
+  \item \textbf{Retrieval + fact-checking ($n=396$, $\sim$40\,\% of the
+        benchmark)} is T5Gemma's strongest advantage. Mechanistically
+        consistent with cross-attention --- the decoder re-attends to the
+        encoded table at every step, which is the shape of ``find this
+        specific thing'' and ``does this claim entail from the table.''
+  \item \textbf{Understanding ($n=84$) --- Gemma-2 wins +15\,pp.} These
+        tasks reward generic instruction-following and concise rephrasing.
+        Mostly reference-free (judged by constraint satisfaction) where
+        decoder-only SFT calibration does better.
+  \item \textbf{Analysis ($n=104$) --- both at 2.9\,\%.} Distribution
+        testing, hypothesis testing, outlier detection, correlation
+        analysis all need numeric reasoning neither 2--5B model has.
+        Reinforces the 2--5B capacity ceiling.
+\end{itemize}
+
+\section*{Per-task deltas ($|\Delta|$ mean score $\geq 1.0$)}
+
+\begin{tabular}{@{}lrrrrc@{}}
+\toprule
+Task & $n$ & T5G & G2 & $\Delta$ & Winner \\
+\midrule
+Understanding & 64 & 5.16 & \hl{7.97} & $-2.81$ & G2 \\
+Hallucination\_Evaluation & 63 & \hl{5.67} & 3.73 & $+1.94$ & T5G \\
+Instruction\_Following & 20 & \hl{2.50} & 0.67 & $+1.83$ & T5G \\
+Table\_Outlier\_Detection & 20 & \hl{3.58} & 1.95 & $+1.63$ & T5G \\
+Table\_Selection & 64 & \hl{3.73} & 2.18 & $+1.55$ & T5G \\
+Table\_Plausibility\_Verification & 15 & \hl{4.29} & 2.86 & $+1.43$ & T5G \\
+Table\_Query & 64 & \hl{3.65} & 2.26 & $+1.39$ & T5G \\
+Mathematical\_Reasoning & 63 & 4.95 & \hl{6.23} & $-1.27$ & G2 \\
+Table\_Domain-specific\_Operations & 34 & \hl{3.53} & 2.34 & $+1.19$ & T5G \\
+Table\_Fact\_Checking & 63 & \hl{7.58} & 6.48 & $+1.11$ & T5G \\
+Table\_Hypothesis\_Testing & 20 & 1.58 & \hl{2.65} & $-1.07$ & G2 \\
+\bottomrule
+\end{tabular}
+
+\medskip
+
+\textbf{Scoreboard (mean score, all 26 tasks):} T5G wins 16, G2 wins 6,
+near-ties ($|\Delta| < 0.3$) = 4. Gemma-2's wins cluster in
+\textbf{general-reasoning} tasks (Understanding, Mathematical\_Reasoning,
+Hypothesis\_Testing) where a well-calibrated CoT helps more than
+cross-attention.
+
+\section*{Take-aways}
+
+\begin{enumerate}
+  \item \textbf{Encoder-decoder helps retrieval + fact-checking at 2--5B
+        scale.} +12\,pp retrieval, +11\,pp fact-checking. Cross-attention
+        is a real architectural lever for table lookup.
+  \item \textbf{It's not free --- 2$\times$ params for +5\,pp overall.} If
+        your task mix is heavily lookup / entailment / cell-selection,
+        T5Gemma pays for itself. For open-ended understanding or math CoT,
+        pick Gemma-2.
+  \item \textbf{2--5B ceiling is load-bearing.} 55\,\% both-wrong; analysis
+        floored at $\sim$3\,\%; multi-step at $\sim$10\,\%. Either scale
+        past 4B or design expectations around this.
+  \item \textbf{Gemma-2 REFUSAL quirk is not noise.} 3.7\,\% vs 1.0\,\%
+        reproduces at larger $n$. Same Google SFT pipeline, so the gap is
+        decoder-only calibration --- or UL2 re-cal --- specific.
+  \item \textbf{The 250-run TRUNCATED (17.7\,\%) was a sampling artifact.}
+        Stratified 1000 gives 1.9\,\%. No reason to raise
+        max\_new\_tokens above 256 for T5Gemma v1.
+\end{enumerate}
+
+\section*{Follow-ups (deferred)}
+
+\begin{itemize}
+  \item \textbf{Gemma-2-9B-IT} as a param-equal comparator (5.6B enc-dec
+        vs $\sim$9B dec-only) --- tells us whether the retrieval
+        advantage is architecture or capacity.
+  \item Probe the SWA-bug threshold on T5Gemma v1; if v1 is bug-free
+        we can relax the 4K-token filter and recover the Multi-step tail.
+  \item Pull the 37 Gemma-2 refusals and look for a systematic pattern
+        (task-type, table length, specific prompt shape).
+\end{itemize}
+
+\section*{Appendix --- representative samples}
+
+Two per bucket (TG / T-{} / -G / -{}-), seed=42 random pick over 1000
+pairs. Predictions truncated to last 250 chars.
+
+\subsection*{T5G only (T-)}
+
+\textbf{\#1 --- Table\_Selection} --- T5Gemma CORRECT (10), Gemma-2 WRONG\_SELECTION (0).
+
+\begin{quote}
+\textbf{Q:} What is ``synthesis'' where ``synthesis'' $>$ 3.016 and ``inflection'' $>$ 0.33? \textbf{Gold:} 3.7.\\
+\textbf{T5G:} Correctly identifies Eskimo (synthesis=3.70, inflection=0.34); emits \texttt{\{"answer": 3.70\}}.\\
+\textbf{G2:} Walks rows ruling each one out, never finds Eskimo, no \texttt{\{"answer"\}} emitted.
+\end{quote}
+
+\textbf{\#2 --- Hallucination\_Evaluation} --- T5Gemma CORRECT (10), Gemma-2 WRONG\_SELECTION (0).
+
+\begin{quote}
+\textbf{Q:} Pick the more realistic continuation for a news lead about Xiaohai Lake's ecology. \textbf{Gold:} (A).\\
+\textbf{T5G:} (A) --- ``directly relates to observed bird activity and lush vegetation.''\\
+\textbf{G2:} (B) --- overweights the ``jewel of the high plateau'' framing.
+\end{quote}
+
+\subsection*{Gemma-2 only (-G)}
+
+\textbf{\#3 --- Table\_Fact\_Checking} --- T5Gemma WRONG\_SELECTION (0), Gemma-2 CORRECT (10).
+
+\begin{quote}
+\textbf{Q:} ``DFDS operates in Denmark only'' --- Entailment / Neutral / Contradiction. \textbf{Gold:} Contradiction.\\
+\textbf{T5G:} Reads ``Baltic Sea, English Channel, North Sea,'' then says \emph{Entailment}. Logic-flip.\\
+\textbf{G2:} Same rows $\to$ Contradiction.
+\end{quote}
+
+\textbf{\#4 --- Table\_Retrieval} --- T5Gemma OTHER (judge parse-fail), Gemma-2 CORRECT (10).
+
+\begin{quote}
+\textbf{Q:} Who has the average 50.16? \textbf{Gold:} Brad Hodge.\\
+\textbf{T5G:} \texttt{\{"answer": "Brad Hodge"\}} --- semantically right, judge JSON didn't parse cleanly.\\
+\textbf{G2:} Same answer, parsed cleanly $\to$ CORRECT.
+\end{quote}
+
+\subsection*{Both correct (TG)}
+
+\textbf{\#5 --- Table\_General\_Operations} --- both CORRECT.
+
+\begin{quote}
+\textbf{Q:} Difference in points between highest and lowest Higher-level grades. \textbf{Gold:} 100.\\
+Both walk H1 (100) and H8 (0), compute 100, emit \texttt{\{"answer": 100\}}.
+\end{quote}
+
+\textbf{\#6 --- Table\_Fact\_Checking} --- both CORRECT.
+
+\begin{quote}
+\textbf{Q:} ``Airbnb was founded on August 2001.'' \textbf{Gold:} Contradiction (table says 2008).\\
+Both spot the year mismatch, both emit Contradiction.
+\end{quote}
+
+\subsection*{Both wrong (-{}-)}
+
+\textbf{\#7 --- Table\_Plausibility\_Verification} --- T5G PARTIAL (5), G2 WRONG\_SELECTION (0).
+
+\begin{quote}
+\textbf{Q:} Identify population anomalies. \textbf{Gold:} Farrer (too high) and O'Malley (too low).\\
+\textbf{T5G:} O'Malley + Phillip (wrong second row) --- half credit.\\
+\textbf{G2:} O'Malley via demographics; misses Farrer.
+\end{quote}
+
+\textbf{\#8 --- Table\_Distribution\_Testing} --- T5G WRONG\_SELECTION (0), G2 TRUNCATED (0).
+
+\begin{quote}
+\textbf{Q:} Does the ``Income (million euros)'' column follow normal? \textbf{Gold:} Yes.\\
+\textbf{T5G:} Hedges ``insufficient information''; emits \texttt{\{"answer": "Insufficient information provided."\}}.\\
+\textbf{G2:} Enumerates Q--Q plots, Shapiro--Wilk, etc. then truncates before answering.
+\end{quote}
+
+\medskip
+\noindent\emph{Reproducibility:} \texttt{sample\_1000.py --seed 42} $\to$
+\texttt{dataset/sample\_1000.json}. Predictions in
+\texttt{results/\{t5gemma\_v1\_1k,gemma2\_2b\_1k\}/}. Merged judged output
+in \texttt{results/judged\_1k\_2way.jsonl} (2000 rows). Judge:
+\texttt{score.py --judge deepseek-v3.2}.
+
+\end{document}
