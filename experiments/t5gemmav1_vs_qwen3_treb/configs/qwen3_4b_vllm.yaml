@@ -1,0 +1,42 @@
+# Qwen3-4B-Instruct-2507 via vLLM — the natural decoder-only comparator at
+# the 4B-param tier. 43% smaller than T5Gemma v1 5.6B. Different pretraining
+# lineage than Gemma-2 (good — gives us a second architecture data point that
+# isn't "same base, different forward pass").
+#
+# Served via vLLM on the treb-eval-qwen image. If the baked vLLM pin doesn't
+# know Qwen3, we `pip install --upgrade "vllm>=0.8.5"` at pod startup — the
+# same pattern the original plan assumed.
+
+variant: qwen3_4b_vllm
+
+model:
+  backend: vllm
+  name_or_path: Qwen/Qwen3-4B-Instruct-2507
+  revision: null
+  adapter: null
+  dtype: bfloat16
+  gpu_memory_utilization: 0.50     # RunPod H100 slots often share memory
+                                    # with neighboring tenants; 0.50 lets us
+                                    # co-exist with another ~40GB workload.
+                                    # Qwen3-4B weights ~8GB + KV cache for
+                                    # 8K ctx fits comfortably.
+  max_model_len: 8192              # Our kept-ids prompts are all <4K T5Gemma
+                                    # tokens ≈ <6K Qwen tokens; 8K is plenty
+                                    # and keeps KV cache small.
+  tensor_parallel_size: 1          # 4B fits trivially on 1× H100
+
+generation:
+  max_new_tokens: 256
+  temperature: 0.0                 # greedy
+  top_p: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT
+  target_ids: dataset/kept_ids.json
+  smoke_size: 250                  # stratifies to 248 (4-bin rounding)
+
+output:
+  predictions_path: /workspace/results/qwen3_4b_vllm/predictions.jsonl
+  metrics_path: /workspace/results/qwen3_4b_vllm/metrics.json

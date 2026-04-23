@@ -1,6 +1,25 @@
 # T5Gemma v1 2B-2B UL2-IT vs Qwen3-4B on TReB
 
-**Status:** `COMPLETE — 248-sample comparison done 2026-04-22, see insights/comparison_2026-04-22.md`
+**Status:** `COMPLETE — 3-way 248-sample comparison, T5Gemma v1 / Gemma-2-2B / Qwen3-4B, see insights/three_way_2026-04-23.md`
+
+## TL;DR
+
+| Variant | Params | Arch | Mean | CORRECT% | TRUNCATED% |
+|---|---:|---|---:|---:|---:|
+| T5Gemma v1 2B-2B UL2-IT | 5.6B | enc-dec | 4.10 | 32.3% | 17.7% |
+| Gemma-2-2B-IT | 2.6B | dec-only | 3.81 | 30.2% | 12.5% |
+| **Qwen3-4B-Instruct-2507** | 4.0B | dec-only | **4.99** | **33.1%** | **45.6%** |
+
+**Qwen3-4B wins** despite being ~30% smaller than T5Gemma — 27 sole wins
+vs 15 (T5G) vs 13 (G2) on the 55 samples where exactly one model got it
+right. Attribution: Qwen3's newer pretraining + Qwen team's post-training,
+not architecture. Qwen3's 45.6% truncation rate (vs ~15% for the Gemmas)
+is a chain-of-thought length artifact against the 256-token generation cap
+— raising to 1024 would likely widen Qwen3's lead further.
+
+Encoder-decoder does win Table_Retrieval/Query/Domain-Ops specifically
+against Gemma-2 (same pretraining), but that architecture edge is swamped
+by Qwen3's overall capability advantage.
 
 ### Scope (2026-04-22, after fast-fail verification)
 

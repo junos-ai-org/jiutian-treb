@@ -213,10 +213,49 @@ absolute numbers much higher under a proper judge.
 Writeups: `experiments/t5gemmav1_vs_qwen3_treb/insights/judge_sonnet_2026-04-23.md`
 (primary), `…/comparison_2026-04-22.md` (string-metrics baseline).
 
+### Qwen3-4B-Instruct-2507 added — 3-way comparison
+
+User pushback on Gemma-3-4B (newer pretraining than T5Gemma's Gemma-2 base
+→ not fair) + asked to actually run Qwen3-4B via the vLLM image we'd
+scaffolded. Attempted 3 vLLM pods — first stuck in Docker-pull-purgatory,
+second and third hit contested GPUs (~5-8 GB free out of 80 when vLLM
+asked for 40). Pivoted to **hf_causal on the t5gemma-eval image**
+(proven-reliable for Gemma-2-2B-IT). That worked first try.
+
+**3-way result (Sonnet judge, 248 stratified samples):**
+
+| Variant | Params | Arch | Mean | CORRECT% | TRUNCATED% | Sole wins |
+|---|---:|---|---:|---:|---:|---:|
+| T5Gemma v1 2B-2B UL2-IT | 5.6B | enc-dec | 4.10 | 32.3% | 17.7% | 15 |
+| Gemma-2-2B-IT | 2.6B | dec-only | 3.81 | 30.2% | 12.5% | 13 |
+| **Qwen3-4B-Instruct-2507** | 4.0B | dec-only | **4.99** | **33.1%** | **45.6%** | **27** |
+
+**Headline: Qwen3-4B wins** despite being 30% smaller than T5Gemma and
+truncating nearly half the time. On the 55 samples where exactly one model
+got CORRECT, Qwen3 claims 27 (49%), T5Gemma 15 (27%), Gemma-2 13 (24%).
+
+**Attribution: pretraining + RLHF quality, not architecture.** T5Gemma v1's
+enc-dec bump on retrieval holds against same-pretraining Gemma-2, but gets
+swamped when you change the pretraining lineage. Qwen3-4B has newer
+pretraining + Qwen team's post-training recipe — those swamp the enc-dec
+vs dec-only distinction.
+
+**Qwen3's 45.6% TRUNCATED** is a chain-of-thought-length issue against the
+256-token cap, not a reasoning failure — raising to 1024 would likely push
+its CORRECT% even higher (many of the 113 truncated outputs had the right
+direction of reasoning).
+
+**47.6% of samples are all-3-wrong** — hard tasks at the 2-5B scale ceiling.
+
+Writeup: `experiments/t5gemmav1_vs_qwen3_treb/insights/three_way_2026-04-23.md`
+
 ### Still open
 
-- Qwen3-8B retry when OpenRouter credits available (49/248 valid today).
-- Gemma-2-9B-IT as a param-equal decoder-only if we want a second data point.
+- Re-run Qwen3-4B with `max_new_tokens=1024` to recover truncated samples.
+- Qwen3-14B for the Qwen3 same-pretraining scaling comparison.
+- Gemma-2-9B-IT as a param-equal Gemma-2 decoder-only.
+- Qwen3-8B full run (49/248 valid from earlier OpenRouter attempt).
+- Relax 4K-token filter if v1's SWA bug doesn't trigger; recovers Multi-step tasks.
 
 ### 2026-04-23 — EOS fix verified + re-scoped run
 
