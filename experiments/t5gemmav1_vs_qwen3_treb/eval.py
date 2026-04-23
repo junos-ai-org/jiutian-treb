@@ -258,14 +258,48 @@ def run_hf_seq2seq(config: dict, samples: list[dict], use_peft: bool = False) ->
         do_sample=g.get("do_sample", False),
         num_beams=g.get("num_beams", 1),
     )
+    # Stop on <end_of_turn> (id 107 in Gemma tokenizers) in addition to <eos>.
+    # T5Gemma v1 UL2-IT never fires <eos> on its own — it repeats the answer
+    # block until max_new_tokens. <end_of_turn> is the chat-template turn
+    # marker, which the IT checkpoint *does* emit. Pass BOTH as stopping
+    # criteria so generation halts cleanly after the model's single response.
+    eot_id = tokenizer.convert_tokens_to_ids("<end_of_turn>")
+    if eot_id is not None and eot_id != tokenizer.unk_token_id:
+        base_eos = tokenizer.eos_token_id
+        eos_ids = [base_eos, eot_id] if isinstance(base_eos, int) else list(base_eos) + [eot_id]
+        gen_kwargs["eos_token_id"] = eos_ids
+        print(f"[eval] stop tokens: eos={base_eos} end_of_turn={eot_id}  combined={eos_ids}")
 
     # Token-budgeted prompt assembly so head (instr/title) + tail (question +
     # format instruction) always survive; table is budgeted with the leftover
     # tokens. See build_prompt_tcot docstring.
-    texts_all = [
-        build_prompt_tcot(s, tokenizer=tokenizer, max_input_tokens=max_input_tokens)
+    use_chat_template = getattr(tokenizer, "chat_template", None) and \
+        config["eval"].get("apply_chat_template", True)
+    # Reserve ~40 tokens of budget for the chat template wrapper so that
+    # after apply_chat_template the total stays under max_input_tokens and
+    # truncation doesn't clip the trailing "<start_of_turn>model\n" cue.
+    CHAT_TEMPLATE_OVERHEAD = 40 if use_chat_template else 0
+    prompt_budget = max_input_tokens - CHAT_TEMPLATE_OVERHEAD
+    raw_prompts = [
+        build_prompt_tcot(s, tokenizer=tokenizer, max_input_tokens=prompt_budget)
         for s in samples
     ]
+    if use_chat_template:
+        # IT checkpoints (T5Gemma v1 UL2-IT, etc.) expect chat-template framing
+        # — <start_of_turn>user / <end_of_turn> markers. Without this wrap, the
+        # model is OOD from its SFT distribution → repetition loops + wrong
+        # EOS behavior. Mirrors what run_vllm already does.
+        texts_all = [
+            tokenizer.apply_chat_template(
+                [{"role": "user", "content": p}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for p in raw_prompts
+        ]
+        print(f"[eval] applied chat template to {len(texts_all)} prompts")
+    else:
+        texts_all = raw_prompts
     lens = [len(tokenizer.encode(t, add_special_tokens=False)) for t in texts_all]
 
     # Length-sorted batching: sort by length ascending so each batch has

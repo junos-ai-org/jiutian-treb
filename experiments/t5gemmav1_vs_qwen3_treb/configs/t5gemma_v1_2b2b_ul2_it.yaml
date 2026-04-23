@@ -16,26 +16,30 @@ model:
   device_map: auto
 
 generation:
-  max_new_tokens: 1024
+  max_new_tokens: 256                # enough for TCoT rationale + {"answer":X}.
+                                      # Was 1024 pre-fix when EOS never fired;
+                                      # post-fix (chat template + end_of_turn
+                                      # stop-id) generation halts well under 256.
   do_sample: false                   # greedy
   num_beams: 1
   temperature: 1.0
 
 eval:
   dataset: JT-LM/JIUTIAN-TReB
-  language: English
+  language: English                  # English only — Chinese is out of scope
+                                      # for this experiment.
   mode: TCoT
   # target_ids: filtered kept set from build_dataset.py. Both variants read
   # the same list so the comparison is on a shared sample subset.
   target_ids: dataset/kept_ids.json
-  smoke_size: 100                    # used only when --smoke is passed;
-                                      # stratified sample of target_ids.
-  batch_size: 1                      # conservative start — v2 had SWA mask
-                                      # shape bug that required batch=1.
-                                      # v1 may tolerate higher; verify on pod.
-  max_input_tokens: 4000             # matches dataset filter cap. We
-                                      # pre-filtered to samples that fit,
-                                      # so this is belt-and-suspenders.
+  apply_chat_template: true          # Critical for IT checkpoints — without
+                                      # it the model goes OOD → repetition.
+  smoke_size: 25                     # small smoke for EOS-fix verification;
+                                      # override via sed at runtime for 250.
+  batch_size: 1                      # v2 needed this for SWA bug; v1 may
+                                      # tolerate higher but not worth bumping
+                                      # risk for a 250-sample run.
+  max_input_tokens: 4000             # matches dataset filter cap (pre-filtered).
 
 output:
   predictions_path: /workspace/results/t5gemma_v1_2b2b_ul2_it/predictions.jsonl

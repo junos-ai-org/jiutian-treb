@@ -20,16 +20,17 @@ model:
   tensor_parallel_size: 1          # 4B fits trivially on 1× H100
 
 generation:
-  max_new_tokens: 1024             # same as T5Gemma side for comparability
+  max_new_tokens: 256              # matches T5Gemma post-fix for comparability
   temperature: 0.0                 # greedy
   top_p: 1.0
 
 eval:
   dataset: JT-LM/JIUTIAN-TReB
-  language: English
+  language: English                # English only — Chinese out of scope.
   mode: TCoT
   target_ids: dataset/kept_ids.json
-  smoke_size: 100
+  # Stratified 250 by default; override to 25 via sed when smoke-testing.
+  smoke_size: 250
 
 output:
   predictions_path: /workspace/results/qwen3_4b_instruct/predictions.jsonl
