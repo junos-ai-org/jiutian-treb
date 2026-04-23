@@ -65,9 +65,82 @@ as a supplementary "long-table" table.
 
 ### Next
 
-1. Write variant configs + new run.sh/run_all.sh in the experiment dir.
-2. New Docker images or rebuild existing with our configs baked in.
-3. SSH into a RunPod, smoke-test T5Gemma v1, probe whether the SWA bug
-   actually fires on v1 (its SWA window is 4096 vs v2's 1024; the bug may
-   or may not transfer).
+1. Write variant configs + new run.sh/run_all.sh in the experiment dir. **done**
+2. New Docker images or rebuild existing with our configs baked in. **deferred
+   — existing `achithanar/treb-eval-t5gemma:latest` verified to support v1.**
+3. SSH into a RunPod, smoke-test T5Gemma v1. **partial — see below.**
 4. Only after T5Gemma v1 full completes: launch Qwen3.
+
+### 2026-04-22 (cont'd) — pod verification on `oqmsie3n5n4x6s` (EU-NL-1, H100 80GB)
+
+Launched existing `achithanar/treb-eval-t5gemma:latest` + tar-streamed our new
+experiment dir to `/workspace/code/`. **Had to manually inject HF_TOKEN** —
+RunPod's pod-launch env didn't propagate HF_TOKEN to the shell even though
+we passed it in the payload. Wrote to `/root/.hf_token` + exported via
+`.bashrc`; `whoami` confirmed `akumch`.
+
+**Smoke — 20 stratified samples, max prompt = 2554 tokens (all under the
+4K SWA threshold):**
+
+| Observation | Status |
+|---|---|
+| Model loads (5.6B bf16) | ✓ ~11.6GB GPU, 2s load time after weight shard fetch |
+| Generation runs | ✓ at batch=1, ~30s/sample due to EOS repetition loop |
+| Output format | ✓ valid `{"answer": X}` JSON on the first iteration |
+| **EOS / stop behavior** | ✗ **model never emits EOS** — repeats the same JSON block until `max_new_tokens=1024` |
+
+**EOS is the critical blocker.** This matches exactly what the sibling v2
+experiment documented: see `experiments/t5gemma_vs_qwen_treb/insights/report.tex`
+("Base T5Gemma 2 never learned to stop"). Apparently v1 UL2-IT inherits
+the same pathology even after Google's SFT+RLHF — or the tokenizer / chat
+template isn't being applied correctly by our vanilla `AutoTokenizer` call
++ plain `model.generate()`.
+
+**Mitigations (next session):**
+1. **Decode-time fix (cheap)**: add `stop_strings=['}']` or equivalent
+   truncation in eval.py so generation stops after the first JSON
+   closes. `score.py` already extracts the first valid JSON via regex
+   (see `extract_json_answer`), so this only saves compute — scoring
+   itself is unaffected.
+2. **Chat template inspection**: the IT checkpoint likely expects
+   `apply_chat_template(...)` wrapping (like Qwen's `<|im_start|>`
+   turn markers). Our current `run_hf_seq2seq` sends the raw prompt text
+   without chat template — Google's t5gemma-2b-2b-ul2-it expects some
+   `<start_of_turn>` / `<end_of_turn>` framing. Fix once and all IT runs
+   will generate cleanly + short outputs → ~10× faster wall-clock.
+3. If chat-template fix yields clean single-JSON outputs, revert to
+   max_new_tokens ~256 (from 1024) to dramatically speed up full run.
+
+**Pod handling**: 20-sample smoke completed. All 20 predictions SCP'd to
+`experiments/t5gemmav1_vs_qwen3_treb/results/t5gemma_v1_2b2b_ul2_it/` with
+sentinel + SHA verified. Pod terminated (HTTP 204). ~$1.50 spent.
+
+**Generation quality eyeball (first 5)**: model produces *correct-looking*
+answers but with format drift from gold (e.g. `{"answer": 2.65}` vs
+gold `Final Answer: 2.65`). Naive EM is 1/20, but this dramatically
+undercounts real quality — proper scoring (ROUGE / numeric-EM /
+LLM-judge) will give a fairer read. 17/20 predictions extract a valid
+`{"answer": ...}` JSON via `score.py::extract_json_answer`. Full
+writeup: `experiments/t5gemmav1_vs_qwen3_treb/insights/verification_smoke_2026-04-22.md`.
+
+**SWA bug status for v1**: not triggered on this smoke (max prompt was
+2554 — below the 4094 threshold). Needs dedicated probe at >4000 tokens
+to know if v1 shares the bug. Low priority since we're pre-filtering anyway.
+
+### Blocked: do not launch full run or Qwen3 yet
+
+Three fixes needed before the full T5Gemma v1 run is worth doing:
+
+1. **Apply chat template** in `eval.py::run_hf_seq2seq`. Currently the
+   HF-seq2seq path sends raw prompt text; the vLLM path already calls
+   `apply_chat_template`. IT checkpoints expect turn markers
+   (`<start_of_turn>` / `<end_of_turn>`). This is likely the fix that
+   makes EOS fire correctly.
+2. **Add `stop_strings=['}```']`** (or similar close-of-JSON pattern) as
+   belt-and-suspenders.
+3. **Drop `max_new_tokens` from 1024 → 256** after (1)(2) land. Enough for
+   TCoT rationale + JSON; cuts wall-clock ~4×.
+
+Once those three ship → smoke again → if clean, launch full T5Gemma v1
+(~6 GPU-hours estimated post-fix, vs the 60-hour slog we'd have today) →
+only then launch Qwen3. Same-pod lifecycle handled by `monitor_pod.sh`.
