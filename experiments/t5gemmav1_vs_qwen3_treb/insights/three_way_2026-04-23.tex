@@ -3,6 +3,7 @@
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage[table]{xcolor}
@@ -107,8 +108,29 @@ check.
 
 \section{Per-TReB-category breakdown}
 
-Counts per TReB capability category with 3-way correctness patterns
-(T=T5Gemma CORRECT, G=Gemma-2 CORRECT, Q=Qwen3 CORRECT, dash = not-CORRECT):
+Counts per TReB capability category with 3-way correctness patterns.
+\textbf{Legend} (T=T5Gemma CORRECT, G=Gemma-2 CORRECT, Q=Qwen3 CORRECT;
+dash = not-CORRECT):
+
+\begin{center}\footnotesize
+\begin{tabular}{llp{0.55\linewidth}}
+\toprule
+\textbf{Column} & \textbf{Pattern} & \textbf{Meaning} \\
+\midrule
+all3   & \texttt{TGQ} & all three got CORRECT \\
+none   & \texttt{-{-}-} & all three got it wrong \\
+T-only & \texttt{T-{-}}  & only T5Gemma got it \\
+G-only & \texttt{-G-}    & only Gemma-2 got it \\
+Q-only & \texttt{-{-}Q}  & only Qwen3 got it \\
+\textbf{TG} & \texttt{TG-} & T5Gemma \checkmark, Gemma-2 \checkmark, Qwen3 $\times$ \\
+\textbf{TQ} & \texttt{T-Q} & T5Gemma \checkmark, Gemma-2 $\times$, Qwen3 \checkmark \\
+\textbf{GQ} & \texttt{-GQ} & T5Gemma $\times$, Gemma-2 \checkmark, Qwen3 \checkmark \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The 8 columns are the 8 possible correctness outcomes on a sample
+($2^3 = 8$) and sum to the category's $n$.
 
 \begin{center}\small
 \begin{tabular}{lrrrrrrrrr}
