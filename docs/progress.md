@@ -145,6 +145,44 @@ Once those three ship → smoke again → if clean, launch full T5Gemma v1
 (~6 GPU-hours estimated post-fix, vs the 60-hour slog we'd have today) →
 only then launch Qwen3. Same-pod lifecycle handled by `monitor_pod.sh`.
 
+### 2026-04-23 — EOS fix lands, scope pivot, comparison done
+
+**EOS fix verified** (commit `d5554bd`): 25-sample smoke went from
+4500-char repetition slop → 503-char clean single JSON response. 10×
+shorter, 10× faster, zero repetition on 248 samples. Scope dropped from
+7018 full to 250 stratified per user direction.
+
+**Pivot from Qwen3-4B to Gemma-2-2B-IT comparator** (commit `<next>`):
+
+1. OpenRouter has no dense Qwen3 <7B. Qwen3-8B is too big for a param-match.
+2. User's OpenRouter account had 0 credits → Qwen3-8B run errored at sample 49.
+3. RunPod EU-NL-1 Docker Hub egress was broken all afternoon — 3 consecutive
+   pods stuck for 10+ min at image pull.
+4. Gemma-2-2B-IT is a **cleaner comparison** than Qwen3 anyway: same
+   Gemma-2 pretraining base as T5Gemma v1, same chat template, same tokenizer,
+   same era SFT/RLHF. Only axis differing is enc-dec vs dec-only.
+
+**Comparison on 248 stratified samples (English TCoT, 4K-token gated):**
+
+| Variant | Params | Arch | EM | ROUGE-L |
+|---|---:|---|---:|---:|
+| T5Gemma v1 2B-2B UL2-IT | 5.6B | enc-dec | 0.105 | **0.244** |
+| Gemma-2-2B-IT | 2.6B | dec-only | **0.113** | 0.231 |
+
+**Directional finding: tie.** Doubling params via enc-dec structure doesn't
+measurably shift TReB/TCoT when you control for pretraining lineage.
+Decoder-only is the per-param winner. Full per-task table in
+`experiments/t5gemmav1_vs_qwen3_treb/insights/comparison_2026-04-22.md`.
+
+Both pods SCP'd + terminated. Total pod spend ~$2.
+
+### Open
+
+- LLM-as-judge pass (DeepSeek-V3 via OpenRouter, ~$1) for a more sensible
+  score than EM / ROUGE-L on text-generation tasks. Waiting on credits.
+- Qwen3-8B retry when OpenRouter credits available (49/248 valid today).
+- Gemma-2-9B-IT as a param-equal decoder-only if we want a second data point.
+
 ### 2026-04-23 — EOS fix verified + re-scoped run
 
 Per user direction, **full 7018 run de-scoped**. New tiered plan: 25-sample

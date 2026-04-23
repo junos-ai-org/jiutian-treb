@@ -224,6 +224,94 @@ def run_vllm(config: dict, samples: list[dict]) -> list[str]:
     return [o.outputs[0].text for o in outs]
 
 
+def run_openrouter(config: dict, samples: list[dict]) -> list[str]:
+    """Call OpenRouter chat-completions API. Used when a local GPU path
+    isn't available (e.g. during RunPod outages) or for models not on HF.
+
+    Uses concurrent requests (up to 8 in flight) so 250 samples finish in
+    ~1-2 min. Authenticates via $OPENROUTER_API_KEY. Greedy decode via
+    temperature=0.
+    """
+    import concurrent.futures as cf
+    import os
+    import time
+    import httpx
+
+    m, g = config["model"], config["generation"]
+    model_id = m["name_or_path"]  # e.g. qwen/qwen3-8b
+    max_new = g.get("max_new_tokens", 256)
+    max_input_tokens = config["eval"].get("max_input_tokens", 8192)
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY not set")
+
+    # We don't have the remote tokenizer, so we approximate with the local
+    # tokenizer from build_prompt_tcot's perspective. Passing tokenizer=None
+    # means char-capped assembly — fine for OpenRouter where the server-side
+    # tokenizer handles truncation.
+    prompts = [
+        build_prompt_tcot(s, tokenizer=None, max_input_tokens=None)
+        for s in samples
+    ]
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    def call_one(idx_and_prompt: tuple[int, str]) -> tuple[int, str]:
+        idx, prompt = idx_and_prompt
+        payload = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_new,
+            "temperature": g.get("temperature", 0.0),
+            "top_p": g.get("top_p", 1.0),
+        }
+        for attempt in range(4):
+            try:
+                with httpx.Client(timeout=120.0) as client:
+                    r = client.post(url, headers=headers, json=payload)
+                    if r.status_code == 200:
+                        data = r.json()
+                        return idx, data["choices"][0]["message"]["content"] or ""
+                    if r.status_code in (429, 500, 502, 503, 504):
+                        time.sleep(2 ** attempt)
+                        continue
+                    return idx, f"[EVAL_ERROR] HTTP {r.status_code}: {r.text[:200]}"
+            except Exception as e:
+                if attempt == 3:
+                    return idx, f"[EVAL_ERROR] {type(e).__name__}: {str(e)[:200]}"
+                time.sleep(2 ** attempt)
+        return idx, "[EVAL_ERROR] exhausted retries"
+
+    concurrency = config["eval"].get("concurrency", 8)
+    print(f"[eval] openrouter: model={model_id} concurrency={concurrency} "
+          f"max_new={max_new} n={len(samples)}", flush=True)
+
+    # Incremental writes so partial progress survives crashes
+    partial_out = Path(config["output"]["predictions_path"]).with_suffix(".partial.jsonl")
+    partial_out.parent.mkdir(parents=True, exist_ok=True)
+    partial_out.write_text("")
+
+    outs: list[str] = [""] * len(samples)
+    done = 0
+    with partial_out.open("a") as pf, cf.ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = [pool.submit(call_one, (i, p)) for i, p in enumerate(prompts)]
+        for fut in cf.as_completed(futures):
+            idx, pred = fut.result()
+            outs[idx] = pred
+            rec = {**samples[idx], "prediction": pred, "variant": config["variant"]}
+            pf.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            done += 1
+            if done % 25 == 0:
+                pf.flush()
+                import os as _os; _os.fsync(pf.fileno())
+                print(f"[eval]   progress {done}/{len(samples)}", flush=True)
+    return outs
+
+
 def run_hf_causal(config: dict, samples: list[dict]) -> list[str]:
     """HF transformers backend for decoder-only models (Qwen3, Llama, etc.).
 
@@ -540,6 +628,8 @@ def main() -> None:
         preds = run_hf_seq2seq(config, samples, use_peft=True)
     elif backend == "hf_causal":
         preds = run_hf_causal(config, samples)
+    elif backend == "openrouter":
+        preds = run_openrouter(config, samples)
     else:
         raise ValueError(f"unknown backend: {backend}")
 

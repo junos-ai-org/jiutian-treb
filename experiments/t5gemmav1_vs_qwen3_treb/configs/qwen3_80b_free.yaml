@@ -1,0 +1,31 @@
+# Qwen3-Next-80B-A3B-Instruct (free-tier via OpenRouter).
+# 80B total params, 3B active (MoE). This is the backup when we couldn't
+# get Qwen3-4B or Qwen3-8B through a non-credit-gated route. Not a strict
+# param-match to T5Gemma v1 5.6B (80B MoE ≠ 5.6B dense enc-dec) but same
+# "modern small-instruct" regime — 3B active params is close to T5Gemma's
+# ~2.6B-per-pass decoder compute at generation time.
+
+variant: qwen3_80b_free
+
+model:
+  backend: openrouter
+  name_or_path: qwen/qwen3-next-80b-a3b-instruct:free
+  revision: null
+
+generation:
+  max_new_tokens: 256
+  temperature: 0.0
+  top_p: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT
+  target_ids: dataset/kept_ids.json
+  smoke_size: 250
+  # Free tier is rate-limited; keep concurrency low to avoid throttling.
+  concurrency: 4
+
+output:
+  predictions_path: ./results/qwen3_80b_free/predictions.jsonl
+  metrics_path: ./results/qwen3_80b_free/metrics.json

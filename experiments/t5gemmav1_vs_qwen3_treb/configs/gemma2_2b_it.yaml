@@ -1,0 +1,36 @@
+# Gemma-2-2B-IT — THE fair apples-to-apples comparison to T5Gemma v1 2B-2B
+# UL2-IT. Same Gemma-2 pretraining base, same era, same tokenizer. The only
+# thing that differs is architecture: decoder-only (this) vs enc-dec (T5Gemma).
+#
+# Params: 2.6B (decoder-only). T5Gemma v1 2B-2B has 5.6B total (enc + dec +
+# tied embed) but ~2.6B per forward pass at generation — so this is the
+# cleanest compute-matched comparison we can run.
+
+variant: gemma2_2b_it
+
+model:
+  backend: hf_causal
+  name_or_path: google/gemma-2-2b-it
+  revision: null
+  adapter: null
+  dtype: bfloat16
+  device_map: auto
+
+generation:
+  max_new_tokens: 256
+  do_sample: false
+  temperature: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT
+  target_ids: dataset/kept_ids.json
+  smoke_size: 250
+  batch_size: 4
+  max_input_tokens: 8192             # Gemma 2 has 8K context — matches the
+                                      # dataset cap.
+
+output:
+  predictions_path: /workspace/results/gemma2_2b_it/predictions.jsonl
+  metrics_path: /workspace/results/gemma2_2b_it/metrics.json

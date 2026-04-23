@@ -1,0 +1,34 @@
+# Qwen3-8B served via OpenRouter — RunPod EU-NL-1 had Docker Hub pull
+# issues during the experiment window (3 consecutive pods stuck in
+# "runtime=null" for 10+ minutes each). OpenRouter's smallest dense Qwen3
+# variant is 8B (no 4B or 1.7B hosted). 8B is ~40% larger than the target
+# 4B and ~45% larger than T5Gemma v1 2B-2B (5.6B) — not a strict param
+# match, but same "small instruct" regime. Document the gap in insights.
+#
+# Reads the SAME target_ids list as t5gemma_v1_2b2b_ul2_it so the
+# comparison is on a shared sample subset.
+
+variant: qwen3_8b_openrouter
+
+model:
+  backend: openrouter
+  name_or_path: qwen/qwen3-8b         # OpenRouter model ID
+  revision: null
+
+generation:
+  max_new_tokens: 256
+  temperature: 0.0                   # greedy
+  top_p: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT
+  target_ids: dataset/kept_ids.json
+  smoke_size: 250
+  concurrency: 8                     # 8 in-flight requests — OpenRouter
+                                      # tolerates this for paid tiers.
+
+output:
+  predictions_path: ./results/qwen3_8b_openrouter/predictions.jsonl
+  metrics_path: ./results/qwen3_8b_openrouter/metrics.json

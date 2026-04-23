@@ -1,6 +1,6 @@
 # T5Gemma v1 2B-2B UL2-IT vs Qwen3-4B on TReB
 
-**Status:** `tiered plan — EOS fix verification in progress`
+**Status:** `COMPLETE — 248-sample comparison done 2026-04-22, see insights/comparison_2026-04-22.md`
 
 ### Scope (2026-04-22, after fast-fail verification)
 
@@ -154,4 +154,21 @@ scp -r root@<pod>:/workspace/results/ experiments/t5gemmav1_vs_qwen3_treb/result
 
 ## TL;DR of findings
 
-*To be populated after runs complete. See `insights/` for analysis.*
+Comparator pivoted from Qwen3-4B to **Gemma-2-2B-IT** (same Gemma-2
+pretraining base as T5Gemma v1 → cleaner architecture-only read). Qwen3-4B
+not available on any API path during the experiment; Qwen3-8B partial run
+retained for later (49/248 valid, blocked by OpenRouter credits).
+
+**On 248 stratified TReB English / TCoT samples:**
+
+| Variant | Params | Arch | EM | ROUGE-L |
+|---|---:|---|---:|---:|
+| T5Gemma v1 2B-2B UL2-IT | 5.6B | enc-dec | 0.105 | **0.244** |
+| Gemma-2-2B-IT | 2.6B | dec-only | **0.113** | 0.231 |
+
+**Tie.** Doubling params via encoder-decoder structure does not measurably
+move overall TReB/TCoT when you control for pretraining lineage. T5Gemma
+does lead on text-generation tasks (Summary, Title_Naming, Retrieval);
+Gemma-2 leads on closed-form classification (Fact_Checking, Understanding).
+
+Full per-task breakdown + caveats: [`insights/comparison_2026-04-22.md`](insights/comparison_2026-04-22.md).

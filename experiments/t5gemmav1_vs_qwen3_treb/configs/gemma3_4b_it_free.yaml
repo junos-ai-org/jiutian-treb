@@ -1,0 +1,43 @@
+# Gemma-3-4B-IT (free-tier via OpenRouter).
+#
+# Why this instead of Qwen3-4B:
+#   - OpenRouter has no dense Qwen <7B. Qwen3-8B (the smallest on OR) is 43%
+#     larger than T5Gemma v1 5.6B — uncontrolled param confound.
+#   - User's OpenRouter balance: 0 credits. Paid models (Qwen3-8B) errored out
+#     after ~49 samples (HTTP 402).
+#   - RunPod EU-NL-1 had Docker-Hub-egress issues at experiment time; 3 pods
+#     stuck booting for 10+ min.
+#
+# Why Gemma-3-4B-IT is actually a CLEANER comparison:
+#   - 4B dense ≈ T5Gemma v1's 2.6B decoder per forward pass. Closer to a
+#     true "active compute" match than Qwen3-8B.
+#   - Same Gemma family lineage as T5Gemma v1 (Gemma-2 -> T5Gemma v1, Gemma-3
+#     -> decoder-only successor). Isolates enc-dec vs dec-only within one
+#     pretraining culture.
+#   - Same chat template format (<start_of_turn>/<end_of_turn>), same
+#     tokenizer family — fewer format-gap confounds.
+#   - FREE on OpenRouter → no quota worries.
+
+variant: gemma3_4b_it_free
+
+model:
+  backend: openrouter
+  name_or_path: google/gemma-3-4b-it:free
+  revision: null
+
+generation:
+  max_new_tokens: 256
+  temperature: 0.0
+  top_p: 1.0
+
+eval:
+  dataset: JT-LM/JIUTIAN-TReB
+  language: English
+  mode: TCoT
+  target_ids: dataset/kept_ids.json
+  smoke_size: 250
+  concurrency: 4                     # free tier — keep rate reasonable
+
+output:
+  predictions_path: ./results/gemma3_4b_it_free/predictions.jsonl
+  metrics_path: ./results/gemma3_4b_it_free/metrics.json
