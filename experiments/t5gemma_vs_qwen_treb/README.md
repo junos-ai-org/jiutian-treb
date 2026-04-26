@@ -131,3 +131,33 @@ for filtering and cross-variant comparison in the wandb UI. Project:
 - [ ] Smoke test (100 samples, ~$1.35)
 - [ ] Full run (3,895 samples × 3 models on 4× H100, ~$18–28)
 - [ ] Analysis write-up in `insights/`
+- [ ] Verify [transformers#45540](https://github.com/huggingface/transformers/pull/45540) unblocks long-context T5Gemma 2 (see `insights/verify_pr45540.{py,sh}`)
+
+## Verifying transformers#45540 (T5Gemma 2 long-input bug fix)
+
+We filed [transformers#45521](https://github.com/huggingface/transformers/issues/45521) — T5Gemma 2 decoder
+self-attention crashes at batch=1 once inputs exceed ~4094 tokens because
+the cross-attention cache was incorrectly built as a sliding-window cache.
+PR [#45540](https://github.com/huggingface/transformers/pull/45540) (APPROVED, not yet merged
+as of 2026-04-25) fixes it; we need to confirm before re-running the
+T5Gemma variants without the 4K cap.
+
+`insights/verify_pr45540.py` runs the exact failure-length sweep from the
+bug report; `insights/verify_pr45540.sh` wraps it in a control/treatment
+harness that pip-installs the PR branch in between.
+
+```bash
+# On a t5gemma-eval pod (H100/A100, ~40 GB VRAM, HF auth for the gated model):
+ssh -i ~/.ssh/runpod_key -p <port> root@<pod-ip>
+cd /opt/eval                         # baked-in path; or /workspace/code if CODE_REPO was set
+bash insights/verify_pr45540.sh      # runs control + treatment, ~6 min on H100
+# scp the log back:
+scp -i ~/.ssh/runpod_key -P <port> \
+    root@<pod-ip>:/workspace/logs/verify_pr45540_*.log \
+    experiments/t5gemma_vs_qwen_treb/insights/
+```
+
+Pass criterion: in the treatment phase, **zero failures at length > 4094**
+across all eight test lengths (3525, 5015, 6499, 7493, 9997, 14967, 19808,
+25135). If it passes, post the log summary to issue #45521 and bump the
+T5Gemma configs' `max_input_tokens` from `4094` back to `32768`.
