@@ -20,6 +20,8 @@ Load the latest checkpoint at the start of a new session to resume context.
   Deep dive into T5Gemma v1 paper, PrefixLM vs UL2 analysis, cross-attention mechanics.
 - `~/.claude/projects/-Users-arunkumarchithanar-research-jiutian-treb/checkpoints/2026-04-17-session-01.json`
   Initial research session: experiment planning, T5Gemma vs Qwen comparison, SFT setup.
+- `~/.claude/projects/-Users-arunkumarchithanar-research-jiutian-treb/checkpoints/2026-04-25-session-01.json`
+  Verified transformers PR #45540 (T5Gemma 2 long-input fix, 8/8 OK); stopped verification pod; recalled 1000-sample T5G v1 vs Gemma-2-2B-IT result (+4.9pp CORRECT).
 
 ## Knowledgebase
 
