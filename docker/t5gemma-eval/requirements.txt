@@ -1,5 +1,8 @@
 # T5Gemma eval stack — HF transformers v5 + PEFT for LoRA adapter loading.
-transformers>=5.0.0
+# transformers pinned to PR #45540 (T5Gemma2 cross-attention cache fix for
+# inputs > 4×sliding_window). Drop the pin and revert to `transformers>=5.7`
+# once the PR merges and ships in a release.
+transformers @ git+https://github.com/Beichen-Ma/transformers.git@b8c3dffd2c27fe11ba804ec35e0c584cc87b9b6b
 peft>=0.13.0
 accelerate>=1.0.0
 bitsandbytes>=0.44.0
