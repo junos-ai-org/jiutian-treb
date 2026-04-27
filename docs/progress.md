@@ -310,3 +310,110 @@ length 237 tokens, max 3791 — well under the 4K filter cap. At ~3 s/sample
 on pod; the baked image pins 0.6.3 which predates Qwen3 support). Same
 stratified 250 samples — the stratifier uses char-length and a fixed
 Random(42) seed, so both variants will see exactly the same subset.
+
+### 2026-04-23 — 1000-sample 2-way rerun, DeepSeek v3.2 judge
+
+Scaled the T5G v1 vs Gemma-2-2B-IT 2-way from 250 → **1000 stratified
+English TCoT samples** to get a tighter category-level read. Swapped the
+judge from Claude Sonnet subagents → **DeepSeek v3.2** via OpenRouter
+(programmatic, ~$0 with the new credits, ~18 min for all 1000 judgments).
+Same 12-mode failure taxonomy + 0–10 score scheme as the 250-run. Commits
+`9d4cee1` (rerun), `b6e89c3` (writeup).
+
+**Headline (2026-04-23):**
+
+| Variant | Params | Arch | EM | ROUGE-L | Mean | CORRECT% | C+P% |
+|---|---:|---|---:|---:|---:|---:|---:|
+| T5Gemma v1 2B-2B UL2-IT | 5.6B | enc-dec | 0.117 | **0.272** | **4.47** | **35.6** | **50.0** |
+| Gemma-2-2B-IT | 2.6B | dec-only | 0.092 | 0.228 | 4.02 | 30.7 | 44.8 |
+| Δ (T5G − G2) | | | +0.025 | +0.044 | **+0.45** | **+4.9 pp** | +5.2 pp |
+
+**2-way buckets (n=1000):** TG=21.4% · T-only=14.2% · G-only=9.3% ·
+**both wrong=55.1%** (2–5B capacity ceiling holds at 4× the sample count).
+
+**Per-category:** T5G wins **retrieval (+12 pp)**, **fact-checking (+11 pp)**,
+computation, summarization, multi-step. Gemma-2 wins **understanding
+(+15 pp)**. Analysis floored at ~3 % both. **T5G wins 16/26 tasks**, G2
+wins 6, near-ties 4.
+
+**Calibration carryover from the 250-run:** Gemma-2 refuses ~4× more
+(3.7 % vs 1.0 %); T5G TRUNCATED dropped to 1.9 % (was 17.7 % at n=250 —
+confirms it was sampling-driven, not a real failure mode).
+
+**Caveat for any writeup:** the +4.9 pp comes at 2× the params (5.6B vs
+2.6B). Comparison isolates architecture × ~2× scale, with same Gemma-2
+pretraining lineage and same Google IT recipe. Param-equal Gemma-2-9B-IT
+remains an open follow-up.
+
+Compute: 1× H100 80GB EU-NL-1, ~80 min T5G + ~15 min G2 + ~18 min judge.
+Writeup: `experiments/t5gemmav1_vs_qwen3_treb/insights/two_way_1k_2026-04-23.md`
+(+ `.tex` + recompiled `.pdf`).
+
+### 2026-04-26 — transformers PR #45540 verification + eval image pin
+
+End-to-end verification of [`huggingface/transformers#45540`](https://github.com/huggingface/transformers/pull/45540)
+("Fix cross-attention cache layer type for T5Gemma2 long inputs"), which
+addresses [issue #45521](https://github.com/huggingface/transformers/issues/45521)
+that we filed on 2026-04-20.
+
+**Verification (commit `7dd0ac3`):** Built a control/treatment harness
+(`experiments/t5gemma_vs_qwen_treb/insights/verify_pr45540.{py,sh}`) and
+ran on RunPod EU-NL-1, 1× H100 80GB, image `treb-eval-t5gemma:latest`,
+torch 2.8.0 + CUDA 12.8, `attn_implementation="eager"`, `batch=1`, on
+`google/t5gemma-2-4b-4b`. Same 8 lengths from the original bug report.
+
+| input tokens | BEFORE (`transformers 5.5.4`) | AFTER (`#45540` @ `b8c3dff`) |
+|-------------:|:-----------------------------:|:----------------------------:|
+| 3525  | OK                     | OK |
+| 5015  | FAIL (a=4097, b=5018)  | OK |
+| 6499  | FAIL (a=4097, b=6502)  | OK |
+| 7493  | FAIL (a=4097, b=7496)  | OK |
+| 9997  | FAIL (a=4097, b=10000) | OK |
+| 14967 | FAIL (a=4097, b=14970) | OK |
+| 19808 | FAIL (a=4097, b=19811) | OK |
+| 25135 | FAIL (a=4097, b=25138) | OK |
+
+Control reproduces the `a=4097` constant exactly (= `4 × sliding_window + 1`);
+treatment passes 8/8 including five lengths above the previous ceiling.
+~13 min wall, ~$0.65. Pod terminated; comment posted to issue #45521.
+Full writeup: `experiments/t5gemma_vs_qwen_treb/insights/verification_pr45540_2026-04-26.md`.
+
+**Upstream PR status:** OPEN, `MERGEABLE` but `BLOCKED`. Approved by
+`@vasqu` (CONTRIBUTOR) on 04-23. All CI green (10× CircleCI, 5× GH
+Actions). The auto-bot left `[For maintainers] Suggested jobs to run
+(before merge): run-slow: t5gemma2` — needs a core HF maintainer to
+trigger the slow suite + merge. Our verification comment on the issue
+should help nudge.
+
+**Eval image pinned** (commit `6b40337`):
+`docker/t5gemma-eval/requirements.txt` now pulls
+`transformers @ git+https://github.com/Beichen-Ma/transformers.git@b8c3dff…`
+so future builds bake the fix in. New helper
+`docker/t5gemma-eval/build.sh` defaults to NOT touching `:latest` (opt
+in with `LATEST=1`) so a PR-pinned image can't silently swap under
+existing pods. To bake on the AWS build server:
+
+```
+git pull origin experiment-setup
+docker/t5gemma-eval/build.sh pr45540-b8c3dff
+```
+
+Produces `treb-eval-t5gemma:<repo-sha>` and `treb-eval-t5gemma:pr45540-b8c3dff`.
+Use the `pr45540-b8c3dff` tag explicitly when launching pods that need
+T5Gemma 2 long-input inference.
+
+**When PR merges:** revert the requirements line to `transformers>=5.7`,
+rebuild, retire the `pr45540-*` tag.
+
+### Still open (rolling)
+
+- Re-run Qwen3-4B with `max_new_tokens=1024` to recover its 45.6%
+  truncated samples from the 250-sample 3-way (likely pushes its
+  CORRECT% higher).
+- Param-equal scaling controls: Qwen3-14B (Qwen3 same-pretraining), and
+  Gemma-2-9B-IT (param-equal dec-only against T5G v1 5.6B enc-dec).
+- Bake + smoke the `pr45540-b8c3dff` image; re-run T5Gemma 2 SFT'd
+  variants on the long-input tail (>4K tokens, especially the Multi-step
+  family that the 4K filter currently drops).
+- Relax the 4K-token filter once the PR-pinned image is in use — recovers
+  Multi-step tasks that were dropped at p90 to dodge the SWA bug.
